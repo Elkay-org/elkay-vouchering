@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
 const { uploadReceiptToDrive, isDriveConfigured } = require('./drive');
+const { sendAdvanceRequestNotification, sendTripSubmittedNotification } = require('./mailer');
 
 const router = express.Router();
 
@@ -39,6 +40,11 @@ async function getAvailableBalance(doerCode) {
     [doerCode]
   );
   return Number(approvedResult.rows[0].total) - Number(drawnResult.rows[0].total);
+}
+
+async function getAccountsEmail() {
+  const result = await pool.query("SELECT value FROM settings WHERE key = 'ACCOUNTS_EMAIL'");
+  return result.rows[0] ? result.rows[0].value : '';
 }
 
 router.get('/doer/:doerCode/context', async (req, res) => {
@@ -85,6 +91,11 @@ router.post('/doer/:doerCode/advance-request', async (req, res) => {
        VALUES ($1, $2, $3, $4, 'Pending', $5) RETURNING *`,
       [requestId, doer.doer_code, purpose || '', requestedAmount, now]
     );
+
+    const accountsEmail = await getAccountsEmail();
+    sendAdvanceRequestNotification(accountsEmail, doer.doer_name, requestId, purpose, requestedAmount)
+      .catch(err => console.error('Advance request notification failed:', err.message));
+
     res.json({ ok: true, record: toAdvanceJson(result.rows[0]) });
   } catch (err) {
     console.error(err);
@@ -268,6 +279,12 @@ router.post('/doer/:doerCode/trip/:tripCode/submit', async (req, res) => {
        WHERE trip_code = $3 RETURNING *`,
       [formatDate(endDate), closingRemarks ? (' | Closing remarks: ' + closingRemarks) : '', req.params.tripCode]
     );
+
+    const doerResult = await pool.query('SELECT doer_name FROM doers WHERE doer_code = $1', [req.params.doerCode]);
+    const accountsEmail = await getAccountsEmail();
+    sendTripSubmittedNotification(accountsEmail, doerResult.rows[0] ? doerResult.rows[0].doer_name : req.params.doerCode, req.params.tripCode, trip.location_visited)
+      .catch(err => console.error('Trip submitted notification failed:', err.message));
+
     res.json({ ok: true, record: toTripJson(result.rows[0]) });
   } catch (err) {
     console.error(err);

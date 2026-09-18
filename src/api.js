@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
 const { requireLogin, requireAccounts } = require('./auth');
+const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -72,6 +73,14 @@ router.post('/advance-requests/:requestId/decide', requireAccounts, safe(async (
     "UPDATE advance_requests SET status = $1, approved_amount = $2, decided_at = $3 WHERE request_id = $4 RETURNING *",
     [approved ? 'Approved' : 'Rejected', finalApprovedAmount, now, req.params.requestId]
   );
+
+  const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [request.doer_code]);
+  const doer = doerResult.rows[0];
+  if (doer) {
+    sendAdvanceDecisionToDoer(doer.email, doer.doer_name, req.params.requestId, approved, finalApprovedAmount, req.session.user.email)
+      .catch(err => console.error('Advance decision email failed:', err.message));
+  }
+
   res.json({ ok: true, record: toAdvanceJson(result.rows[0]) });
 }));
 
@@ -115,6 +124,14 @@ router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
     "UPDATE trips SET trip_status = 'Passed', passed_by = $1, passed_date = $2 WHERE trip_code = $3 RETURNING *",
     [req.session.user.name || req.session.user.email, now, req.params.tripCode]
   );
+
+  const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
+  const doer = doerResult.rows[0];
+  if (doer) {
+    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, true, null, req.session.user.email)
+      .catch(err => console.error('Trip pass email failed:', err.message));
+  }
+
   res.json({ ok: true, record: toTripJson(result.rows[0]) });
 }));
 
@@ -131,6 +148,14 @@ router.post('/trips/:tripCode/reject', requireAccounts, safe(async (req, res) =>
     "UPDATE trips SET trip_status = 'Rejected', rejection_remark = $1 WHERE trip_code = $2 RETURNING *",
     [remark, req.params.tripCode]
   );
+
+  const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
+  const doer = doerResult.rows[0];
+  if (doer) {
+    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, false, remark, req.session.user.email)
+      .catch(err => console.error('Trip reject email failed:', err.message));
+  }
+
   res.json({ ok: true, record: toTripJson(result.rows[0]) });
 }));
 
