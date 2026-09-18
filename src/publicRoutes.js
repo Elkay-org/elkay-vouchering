@@ -189,10 +189,14 @@ router.post('/doer/:doerCode/trip/:tripCode/vouchers', async (req, res) => {
       if (!receiptPhotoBase64) {
         return res.status(400).json({ ok: false, error: 'A receipt photo is required (or mark "No receipt" with a reason).' });
       }
-      if (isDriveConfigured()) {
-        const buffer = Buffer.from(receiptPhotoBase64, 'base64');
-        const filename = `receipt_${Date.now()}.jpg`;
-        receiptPhotoUrl = await uploadReceiptToDrive(buffer, filename, receiptPhotoMimeType || 'image/jpeg', req.params.tripCode);
+      if (!isDriveConfigured()) {
+        return res.status(500).json({ ok: false, error: 'Receipt storage is not set up correctly. Contact Accounts before continuing - your photo was not saved.' });
+      }
+      const buffer = Buffer.from(receiptPhotoBase64, 'base64');
+      const filename = `receipt_${Date.now()}.jpg`;
+      receiptPhotoUrl = await uploadReceiptToDrive(buffer, filename, receiptPhotoMimeType || 'image/jpeg', req.params.tripCode);
+      if (!receiptPhotoUrl) {
+        return res.status(500).json({ ok: false, error: 'Could not upload the receipt photo. Please try again.' });
       }
     }
 

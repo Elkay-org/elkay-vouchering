@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elkay Vouchering — My Trips</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .portal-page{max-width:760px;margin:0 auto;padding:32px 20px 60px;}
+    .portal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;}
+    .portal-header h1{font-size:19px;}
+    .portal-header .sub{color:var(--text-3);font-size:12.5px;margin-top:2px;}
+    .switch-doer-link{font-size:12px;color:var(--teal-text);cursor:pointer;}
+    .balance-card{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:10px;padding:16px 18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;}
+    .balance-card .amount{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--teal-text);}
+    .balance-card .label{font-size:11px;color:var(--text-3);text-transform:uppercase;}
+    .section-row{display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;}
+    .voucher-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line-soft);}
+    .voucher-row:last-child{border-bottom:none;}
+    .no-receipt-toggle{display:flex;align-items:center;gap:8px;margin:8px 0 14px;font-size:13px;color:var(--text-2);}
+  </style>
+</head>
+<body>
+  <div class="portal-page" id="portalPage">
+
+    <!-- ===== PICK DOER (identify yourself, no password) ===== -->
+    <div id="view-pick-doer">
+      <div class="portal-header"><div><h1>Elkay Vouchering</h1><p class="sub">Select your name to continue</p></div></div>
+      <div class="field"><label>Your Name</label>
+        <select id="pd-doer-select"><option value="">Loading...</option></select>
+      </div>
+      <button onclick="pickDoer()">Continue</button>
+    </div>
+
+    <!-- ===== MY TRIPS (main screen after picking a name) ===== -->
+    <div id="view-my-trips" style="display:none;">
+      <div class="portal-header">
+        <div><h1 id="mt-greeting">My Trips</h1><p class="sub">Start a trip, add vouchers, and submit for Accounts review.</p></div>
+        <span class="switch-doer-link" onclick="switchDoer()">Not you? Switch</span>
+      </div>
+
+      <div class="balance-card">
+        <div><div class="label">Available Advance Balance</div><div class="amount" id="mt-balance">Rs. 0</div></div>
+        <button class="secondary small" onclick="openRequestAdvance()">Request Advance</button>
+      </div>
+
+      <div class="section-row"><h3>Trips</h3><button onclick="openStartTrip()">+ Start Trip</button></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Trip Code</th><th>Location</th><th>Start Date</th><th>Status</th></tr></thead>
+          <tbody id="mt-trips-body"></tbody>
+        </table>
+      </div>
+
+      <div class="section-row"><h3>Advance Request History</h3></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Request ID</th><th>Purpose</th><th>Requested</th><th>Approved</th><th>Status</th></tr></thead>
+          <tbody id="mt-advances-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="errorState" style="display:none;text-align:center;padding:60px 20px;">
+      <h1>Something went wrong</h1>
+      <p class="sub" id="errorText"></p>
+    </div>
+  </div>
+
+  <!-- ===== MODALS ===== -->
+
+  <div class="modal-bg" id="modal-start-trip">
+    <div class="modal">
+      <h3>Start a Trip</h3>
+      <div class="field"><label>Initiated By <span style="font-weight:400;">(who told you to go)</span></label><input id="st-initiatedby"></div>
+      <div class="field"><label>Vertical</label><input id="st-vertical"></div>
+      <div class="field"><label>Location Visited</label><input id="st-location"></div>
+      <div class="field"><label>Start Date</label><input type="date" id="st-startdate"></div>
+      <div class="field"><label>Purpose of Visit</label><textarea id="st-purpose"></textarea></div>
+      <div class="field" id="st-advance-field">
+        <label>Advance</label>
+        <select id="st-useadvance">
+          <option value="no">No advance needed</option>
+          <option value="yes">Use my available balance</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" onclick="closeModal('modal-start-trip')">Cancel</button>
+        <button onclick="submitStartTrip()">Start Trip</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="modal-request-advance">
+    <div class="modal">
+      <h3>Request an Advance</h3>
+      <div class="field"><label>Purpose</label><input id="ra-purpose"></div>
+      <div class="field"><label>Requested Amount (Rs.)</label><input type="number" id="ra-amount"></div>
+      <div class="modal-actions">
+        <button class="secondary" onclick="closeModal('modal-request-advance')">Cancel</button>
+        <button onclick="submitRequestAdvance()">Submit Request</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="modal-trip-view">
+    <div class="modal" style="width:640px;">
+      <h3 id="tv-title">Trip</h3>
+      <div id="tv-body"></div>
+      <div id="tv-vouchers-section">
+        <div class="section-row" style="margin-top:18px;"><h3 style="font-size:14px;">Vouchers</h3><button class="small" id="tv-add-voucher-btn" onclick="openAddVoucher()">+ Add Voucher</button></div>
+        <div id="tv-vouchers-list"></div>
+      </div>
+      <div class="modal-actions" id="tv-actions"></div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="modal-add-voucher">
+    <div class="modal">
+      <h3>Add Voucher</h3>
+      <div class="grid2">
+        <div class="field"><label>Date</label><input type="date" id="av-date"></div>
+        <div class="field"><label>Expense Type</label>
+          <select id="av-type"><option>Travel</option><option>Food</option><option>Accommodation</option><option>Other</option></select>
+        </div>
+      </div>
+      <div class="field"><label>Description</label><input id="av-description"></div>
+      <div class="field"><label>Amount (Rs.)</label><input type="number" id="av-amount"></div>
+      <div class="no-receipt-toggle">
+        <input type="checkbox" id="av-noreceipt" onchange="toggleNoReceiptFields()" style="width:auto;">
+        <label style="margin:0;text-transform:none;font-size:13px;color:var(--text-2);">No receipt available</label>
+      </div>
+      <div class="field" id="av-receipt-field"><label>Receipt Photo</label><input type="file" id="av-receipt-file" accept="image/*" capture="environment"></div>
+      <div class="field" id="av-noreceipt-field" style="display:none;"><label>Reason no receipt is available</label><input id="av-noreceipt-reason"></div>
+      <div class="modal-actions">
+        <button class="secondary" onclick="closeModal('modal-add-voucher')">Cancel</button>
+        <button id="av-save-btn" onclick="submitAddVoucher()">Add Voucher</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="modal-submit-trip">
+    <div class="modal">
+      <h3>Submit Trip for Review</h3>
+      <p class="sub" style="margin-bottom:14px;">Once submitted, vouchers can no longer be added or edited until Accounts reviews it.</p>
+      <div class="field"><label>End Date</label><input type="date" id="sb-enddate"></div>
+      <div class="field"><label>Closing Remarks <span style="font-weight:400;">(optional)</span></label><textarea id="sb-remarks"></textarea></div>
+      <div class="modal-actions">
+        <button class="secondary" onclick="closeModal('modal-submit-trip')">Cancel</button>
+        <button onclick="submitCloseTrip()">Submit Trip</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/doer-portal.js"></script>
+</body>
+</html>
