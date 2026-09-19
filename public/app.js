@@ -1,4 +1,4 @@
-let STATE = { trips: [], advances: [], doers: [], settings: {}, user: null };
+let STATE = { trips: [], advances: [], doers: [], settings: {}, user: null, tripStatusFilter: null };
 
 function toast(msg, isError) {
   const t = document.getElementById('toast');
@@ -180,17 +180,25 @@ function renderTrips() {
   const counts = { Ongoing: 0, Submitted: 0, Passed: 0, Rejected: 0 };
   STATE.trips.forEach(t => { if (counts[t.TripStatus] !== undefined) counts[t.TripStatus]++; });
   document.getElementById('metrics-trips').innerHTML = Object.entries(counts).map(([status, n]) => `
-    <div class="metric"><div class="mvalue">${n}</div><div class="mlabel">${status}</div></div>
+    <div class="metric ${STATE.tripStatusFilter === status ? 'active' : ''}" onclick="filterTripsByStatus('${status}')">
+      <div class="mvalue">${n}</div><div class="mlabel">${status}</div>
+    </div>
   `).join('');
 
+  const filtered = STATE.tripStatusFilter ? STATE.trips.filter(t => t.TripStatus === STATE.tripStatusFilter) : STATE.trips;
   const tbody = document.getElementById('tbl-trips-body');
-  if (!STATE.trips.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No trips yet.</td></tr>'; return; }
-  tbody.innerHTML = STATE.trips.map(t => `
+  if (!filtered.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">${STATE.tripStatusFilter ? 'No ' + STATE.tripStatusFilter.toLowerCase() + ' trips.' : 'No trips yet.'}</td></tr>`; return; }
+  tbody.innerHTML = filtered.map(t => `
     <tr onclick="openTripDetail('${t.TripCode}')" style="cursor:pointer;">
       <td class="mono">${t.TripCode}</td><td>${t.DoerName || t.DoerCode}</td><td>${t.LocationVisited || '—'}</td>
       <td>${t.StartDate || '—'}</td><td>${t.EndDate || '—'}</td><td>Rs. ${t.AdvanceReceived.toLocaleString('en-IN')}</td>
       <td><span class="badge ${tripStatusBadgeClass(t.TripStatus)}">${t.TripStatus}</span></td>
     </tr>`).join('');
+}
+
+function filterTripsByStatus(status) {
+  STATE.tripStatusFilter = (STATE.tripStatusFilter === status) ? null : status; // click again to clear
+  renderTrips();
 }
 
 async function openTripDetail(tripCode) {
@@ -236,14 +244,15 @@ async function openTripDetail(tripCode) {
       </div>
     `;
     const actions = document.getElementById('td-actions');
+    const deleteBtn = `<button class="secondary" style="border-color:var(--red);color:var(--red-text);margin-right:auto;" onclick="submitDeleteTrip('${t.TripCode}')">Delete</button>`;
     if (t.TripStatus === 'Submitted') {
-      actions.innerHTML = `
+      actions.innerHTML = deleteBtn + `
         <button class="secondary" style="border-color:var(--red);color:var(--red-text);" onclick="closeModal('modal-trip-detail');openRejectTrip('${t.TripCode}')">Reject</button>
         <button onclick="submitPassTrip('${t.TripCode}')">Pass</button>`;
     } else if (t.TripStatus === 'Rejected') {
-      actions.innerHTML = `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
+      actions.innerHTML = deleteBtn + `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
     } else {
-      actions.innerHTML = `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
+      actions.innerHTML = deleteBtn + `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
     }
     openModal('modal-trip-detail');
   } catch (err) { toast(err.message, true); }
@@ -285,6 +294,16 @@ async function submitReopenTrip(tripCode) {
   } catch (err) { toast(err.message, true); }
 }
 
+async function submitDeleteTrip(tripCode) {
+  if (!confirm(`Permanently delete ${tripCode} and all its vouchers? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/trips/${tripCode}`);
+    closeModal('modal-trip-detail');
+    toast('Trip deleted');
+    loadAll();
+  } catch (err) { toast(err.message, true); }
+}
+
 /* ---------------- ADVANCE REQUESTS ---------------- */
 
 function renderAdvances() {
@@ -296,8 +315,20 @@ function renderAdvances() {
       <td>Rs. ${a.RequestedAmount.toLocaleString('en-IN')}</td>
       <td>${a.ApprovedAmount != null ? 'Rs. ' + a.ApprovedAmount.toLocaleString('en-IN') : '—'}</td>
       <td><span class="badge ${a.Status === 'Approved' ? 'pass' : a.Status === 'Rejected' ? 'rejected' : 'pending'}">${a.Status}</span></td>
-      <td>${a.Status === 'Pending' ? `<button class="small" onclick="openDecideAdvance('${a.RequestID}', ${a.RequestedAmount})">Decide</button>` : ''}</td>
+      <td>
+        ${a.Status === 'Pending' ? `<button class="small" onclick="openDecideAdvance('${a.RequestID}', ${a.RequestedAmount})">Decide</button>` : ''}
+        <button class="small secondary" style="border-color:var(--red);color:var(--red-text);" onclick="submitDeleteAdvance('${a.RequestID}')">Delete</button>
+      </td>
     </tr>`).join('');
+}
+
+async function submitDeleteAdvance(requestId) {
+  if (!confirm(`Permanently delete advance request ${requestId}? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/advance-requests/${requestId}`);
+    toast('Advance request deleted');
+    loadAll();
+  } catch (err) { toast(err.message, true); }
 }
 
 function openDecideAdvance(requestId, requestedAmount) {

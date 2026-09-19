@@ -84,6 +84,13 @@ router.post('/advance-requests/:requestId/decide', requireAccounts, safe(async (
   res.json({ ok: true, record: toAdvanceJson(result.rows[0]) });
 }));
 
+// Deletes an advance request entirely - matching HRMS's pattern of
+// allowing deletion at any stage.
+router.delete('/advance-requests/:requestId', requireAccounts, safe(async (req, res) => {
+  await pool.query('DELETE FROM advance_requests WHERE request_id = $1', [req.params.requestId]);
+  res.json({ ok: true });
+}));
+
 function toAdvanceJson(r) {
   return {
     RequestID: r.request_id, DoerCode: r.doer_code, Purpose: r.purpose,
@@ -168,6 +175,16 @@ router.post('/trips/:tripCode/reopen', requireAccounts, safe(async (req, res) =>
 
   const result = await pool.query("UPDATE trips SET trip_status = 'Ongoing' WHERE trip_code = $1 RETURNING *", [req.params.tripCode]);
   res.json({ ok: true, record: toTripJson(result.rows[0]) });
+}));
+
+// Deletes a trip and its vouchers entirely - available at any status,
+// matching HRMS's "delete available at any stage" pattern. This is a
+// real, permanent removal (not a status change), so the frontend
+// confirms with the user before calling this.
+router.delete('/trips/:tripCode', requireAccounts, safe(async (req, res) => {
+  await pool.query('DELETE FROM vouchers WHERE trip_code = $1', [req.params.tripCode]);
+  await pool.query('DELETE FROM trips WHERE trip_code = $1', [req.params.tripCode]);
+  res.json({ ok: true });
 }));
 
 function toTripJson(t) {
