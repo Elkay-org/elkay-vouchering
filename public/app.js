@@ -245,14 +245,15 @@ async function openTripDetail(tripCode) {
     `;
     const actions = document.getElementById('td-actions');
     const deleteBtn = `<button class="secondary" style="border-color:var(--red);color:var(--red-text);margin-right:auto;" onclick="submitDeleteTrip('${t.TripCode}')">Delete</button>`;
+    const pdfBtn = `<button class="secondary" onclick="window.open('/api/trips/${t.TripCode}/pdf', '_blank')">Download PDF</button>`;
     if (t.TripStatus === 'Submitted') {
-      actions.innerHTML = deleteBtn + `
+      actions.innerHTML = deleteBtn + pdfBtn + `
         <button class="secondary" style="border-color:var(--red);color:var(--red-text);" onclick="closeModal('modal-trip-detail');openRejectTrip('${t.TripCode}')">Reject</button>
         <button onclick="submitPassTrip('${t.TripCode}')">Pass</button>`;
     } else if (t.TripStatus === 'Rejected') {
-      actions.innerHTML = deleteBtn + `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
+      actions.innerHTML = deleteBtn + pdfBtn + `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
     } else {
-      actions.innerHTML = deleteBtn + `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
+      actions.innerHTML = deleteBtn + pdfBtn + `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
     }
     openModal('modal-trip-detail');
   } catch (err) { toast(err.message, true); }

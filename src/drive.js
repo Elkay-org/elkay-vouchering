@@ -96,4 +96,35 @@ function isDriveConfigured() {
   return !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && !!process.env.GOOGLE_DRIVE_FOLDER_ID;
 }
 
-module.exports = { uploadReceiptToDrive, isDriveConfigured };
+/** Pulls the file ID out of a Drive webViewLink, e.g. .../file/d/FILE_ID/view */
+function extractDriveFileId(url) {
+  if (!url) return null;
+  const match = url.match(/\/file\/d\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Downloads a receipt photo's raw bytes back out of Drive, for
+ * embedding in the PDF. Returns null (never throws) if anything goes
+ * wrong - one missing/broken photo shouldn't take down the whole PDF,
+ * the caller just skips that one and carries on.
+ */
+async function downloadReceiptFromDrive(driveUrl) {
+  try {
+    const fileId = extractDriveFileId(driveUrl);
+    if (!fileId) return null;
+    const drive = getDriveClient();
+    if (!drive) return null;
+
+    const res = await drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'arraybuffer' }
+    );
+    return Buffer.from(res.data);
+  } catch (err) {
+    console.error('Could not download receipt from Drive:', err.message);
+    return null;
+  }
+}
+
+module.exports = { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive };

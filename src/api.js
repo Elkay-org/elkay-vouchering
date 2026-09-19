@@ -3,6 +3,8 @@ const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
 const { requireLogin, requireAccounts } = require('./auth');
 const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
+const { buildVoucherPdf } = require('./voucherPdf');
+const { downloadReceiptFromDrive } = require('./drive');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -118,6 +120,40 @@ router.get('/trips/:tripCode', safe(async (req, res) => {
   if (!trip) return res.status(404).json({ ok: false, error: 'Trip not found.' });
   const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
   res.json({ ok: true, trip: { ...toTripJson(trip), DoerName: trip.doer_name }, vouchers: vouchersResult.rows.map(toVoucherJson) });
+}));
+
+// Downloads the Petty Cash Voucher PDF, matching Elkay's paper format -
+// available at any trip status, matching the original design ("Accounts
+// can download a PDF at any point").
+router.get('/trips/:tripCode/pdf', safe(async (req, res) => {
+  const tripResult = await pool.query(`
+    SELECT t.*, d.doer_name, d.email FROM trips t JOIN doers d ON d.doer_code = t.doer_code WHERE t.trip_code = $1
+  `, [req.params.tripCode]);
+  const trip = tripResult.rows[0];
+  if (!trip) return res.status(404).json({ ok: false, error: 'Trip not found.' });
+  const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
+  const vouchers = vouchersResult.rows.map(toVoucherJson);
+
+  // Fetch every receipt photo in parallel (not one at a time) so this
+  // stays fast even with several vouchers - one failed/missing photo
+  // just gets skipped rather than breaking the whole PDF.
+  const withPhotos = vouchers.filter(v => v.ReceiptPhotoURL);
+  const fetched = await Promise.all(
+    withPhotos.map(v => downloadReceiptFromDrive(v.ReceiptPhotoURL).then(buffer => ({ voucherId: v.VoucherID, buffer })))
+  );
+  const receiptImages = fetched.filter(r => r.buffer); // drop any that failed to download
+
+  const pdfBuffer = await buildVoucherPdf({
+    trip: toTripJson(trip),
+    doer: { DoerName: trip.doer_name, Email: trip.email },
+    vouchers,
+    passedBy: trip.passed_by,
+    receiptImages
+  });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Petty Cash Voucher - ${trip.trip_code}.pdf"`);
+  res.send(pdfBuffer);
 }));
 
 router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
