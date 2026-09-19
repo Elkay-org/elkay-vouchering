@@ -100,6 +100,7 @@ async function initSchema() {
   // CREATE TABLE IF NOT EXISTS alone doesn't retroactively add columns
   // to a table that already exists. Safe to run on every startup.
   await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS closing_remarks TEXT;`);
+  await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS voucher_pdf_drive_link TEXT;`);
 
   // Seeds the two Settings keys the first time only - safe to run on
   // every startup, never overwrites a value you've already changed from

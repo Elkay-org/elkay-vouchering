@@ -127,4 +127,37 @@ async function downloadReceiptFromDrive(driveUrl) {
   }
 }
 
-module.exports = { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive };
+/**
+ * Uploads the finalized Petty Cash Voucher PDF to its own "Petty Cash
+ * Vouchers" subfolder - kept separate from the receipt photos, matching
+ * how HRMS keeps "Offer Letters" and "Salary Slips" in their own
+ * subfolders. Returns the shareable link, or null if Drive isn't
+ * configured.
+ */
+async function uploadVoucherPdfToDrive(buffer, tripCode) {
+  const drive = getDriveClient();
+  if (!drive) return null;
+
+  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!rootFolderId) throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set');
+
+  const folderId = await getOrCreateSubfolder('Petty Cash Vouchers', rootFolderId);
+  const stream = Readable.from(buffer);
+
+  const file = await drive.files.create({
+    requestBody: { name: `Petty Cash Voucher - ${tripCode}.pdf`, parents: [folderId] },
+    media: { mimeType: 'application/pdf', body: stream },
+    fields: 'id, webViewLink',
+    supportsAllDrives: true
+  });
+
+  await drive.permissions.create({
+    fileId: file.data.id,
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true
+  });
+
+  return file.data.webViewLink;
+}
+
+module.exports = { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive, uploadVoucherPdfToDrive };

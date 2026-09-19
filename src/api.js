@@ -4,7 +4,7 @@ const { formatDate, nextSequentialCode } = require('./idHelper');
 const { requireLogin, requireAccounts } = require('./auth');
 const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
 const { buildVoucherPdf } = require('./voucherPdf');
-const { downloadReceiptFromDrive } = require('./drive');
+const { downloadReceiptFromDrive, uploadVoucherPdfToDrive } = require('./drive');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -125,13 +125,9 @@ router.get('/trips/:tripCode', safe(async (req, res) => {
 // Downloads the Petty Cash Voucher PDF, matching Elkay's paper format -
 // available at any trip status, matching the original design ("Accounts
 // can download a PDF at any point").
-router.get('/trips/:tripCode/pdf', safe(async (req, res) => {
-  const tripResult = await pool.query(`
-    SELECT t.*, d.doer_name, d.email FROM trips t JOIN doers d ON d.doer_code = t.doer_code WHERE t.trip_code = $1
-  `, [req.params.tripCode]);
-  const trip = tripResult.rows[0];
-  if (!trip) return res.status(404).json({ ok: false, error: 'Trip not found.' });
-  const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
+/** Builds the voucher PDF buffer for a trip - shared by the download route and the auto-save-on-Pass step. */
+async function buildTripPdfBuffer(trip, doerName, doerEmail) {
+  const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [trip.trip_code]);
   const vouchers = vouchersResult.rows.map(toVoucherJson);
 
   // Fetch every receipt photo in parallel (not one at a time) so this
@@ -145,11 +141,22 @@ router.get('/trips/:tripCode/pdf', safe(async (req, res) => {
 
   const pdfBuffer = await buildVoucherPdf({
     trip: toTripJson(trip),
-    doer: { DoerName: trip.doer_name, Email: trip.email },
+    doer: { DoerName: doerName, Email: doerEmail },
     vouchers,
     passedBy: trip.passed_by,
     receiptImages
   });
+  return pdfBuffer;
+}
+
+router.get('/trips/:tripCode/pdf', safe(async (req, res) => {
+  const tripResult = await pool.query(`
+    SELECT t.*, d.doer_name, d.email FROM trips t JOIN doers d ON d.doer_code = t.doer_code WHERE t.trip_code = $1
+  `, [req.params.tripCode]);
+  const trip = tripResult.rows[0];
+  if (!trip) return res.status(404).json({ ok: false, error: 'Trip not found.' });
+
+  const pdfBuffer = await buildTripPdfBuffer(trip, trip.doer_name, trip.email);
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="Petty Cash Voucher - ${trip.trip_code}.pdf"`);
@@ -163,9 +170,10 @@ router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
   if (trip.trip_status !== 'Submitted') return res.status(400).json({ ok: false, error: 'Only submitted trips can be passed.' });
 
   const now = formatDate(new Date());
-  const result = await pool.query(
+  const passedBy = req.session.user.name || req.session.user.email;
+  let result = await pool.query(
     "UPDATE trips SET trip_status = 'Passed', passed_by = $1, passed_date = $2 WHERE trip_code = $3 RETURNING *",
-    [req.session.user.name || req.session.user.email, now, req.params.tripCode]
+    [passedBy, now, req.params.tripCode]
   );
 
   const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
@@ -173,6 +181,27 @@ router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
   if (doer) {
     sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, true, null, req.session.user.email)
       .catch(err => console.error('Trip pass email failed:', err.message));
+  }
+
+  // Generate the official Petty Cash Voucher PDF now that the trip is
+  // finalized, and save it to Drive - this becomes the permanent,
+  // saved copy visible from the dashboard, separate from the
+  // "Download PDF" button which regenerates on demand at any time.
+  try {
+    const passedTrip = result.rows[0];
+    const pdfBuffer = await buildTripPdfBuffer(passedTrip, doer ? doer.doer_name : trip.doer_code, doer ? doer.email : null);
+    const driveLink = await uploadVoucherPdfToDrive(pdfBuffer, req.params.tripCode);
+    if (driveLink) {
+      result = await pool.query(
+        'UPDATE trips SET voucher_pdf_drive_link = $1 WHERE trip_code = $2 RETURNING *',
+        [driveLink, req.params.tripCode]
+      );
+    }
+  } catch (err) {
+    // Don't fail the whole Pass action if Drive saving hiccups - the
+    // trip is still correctly Passed, Accounts can use Download PDF
+    // as a fallback and we log this for follow-up.
+    console.error('Could not save voucher PDF to Drive:', err.message);
   }
 
   res.json({ ok: true, record: toTripJson(result.rows[0]) });
@@ -229,6 +258,7 @@ function toTripJson(t) {
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
     ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
+    VoucherPdfDriveLink: t.voucher_pdf_drive_link,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }

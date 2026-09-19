@@ -228,6 +228,7 @@ async function openTripDetail(tripCode) {
         </div>
       </div>
       <div class="field"><label>Purpose of Visit</label><div>${t.PurposeOfVisit}</div></div>
+      ${t.VoucherPdfDriveLink ? `<div class="field"><label>Saved Voucher PDF</label><div><a class="doc-link" href="${t.VoucherPdfDriveLink}" target="_blank">View Saved PDF</a></div></div>` : ''}
       ${t.ClosingRemarks ? `<div class="field"><label>Doer's Closing Remarks</label><div>${t.ClosingRemarks}</div></div>` : ''}
       ${t.ReceiptNotReceivedFor ? `<div class="field"><label>Missing Receipts</label><div style="color:var(--amber-text);">${t.ReceiptNotReceivedFor}</div></div>` : ''}
       ${t.TripStatus === 'Rejected' && t.RejectionRemark ? `<div class="field"><label>Rejection Remark</label><div style="color:var(--red-text);">${t.RejectionRemark}</div></div>` : ''}
