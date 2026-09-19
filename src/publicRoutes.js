@@ -141,8 +141,12 @@ function toAdvanceJson(r) {
 
 router.get('/doer/:doerCode/trips', async (req, res) => {
   try {
+    // Passed trips drop off the Doer's own list once Accounts finalizes
+    // them - by that point the Doer has already been emailed the
+    // decision, the balance is settled, and Accounts keeps the
+    // permanent record (including the saved PDF).
     const result = await pool.query(
-      'SELECT * FROM trips WHERE doer_code = $1 ORDER BY id DESC',
+      "SELECT * FROM trips WHERE doer_code = $1 AND trip_status != 'Passed' ORDER BY id DESC",
       [req.params.doerCode]
     );
     res.json({ ok: true, trips: result.rows.map(toTripJson) });
@@ -324,6 +328,7 @@ function toTripJson(t) {
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
     ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
+    VoucherPdfDriveLink: t.voucher_pdf_drive_link,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }

@@ -64,6 +64,10 @@ function showApp() {
   document.getElementById('mainApp').style.display = 'flex';
   document.getElementById('userboxName').textContent = STATE.user.name || STATE.user.email;
   document.getElementById('userboxRole').textContent = STATE.user.role;
+  // Settings (including the Accounts login itself) is Admin-only -
+  // hidden entirely from Accounts, not just visually de-emphasized.
+  const settingsNav = document.querySelector('.side-item[data-page="settings"]');
+  if (settingsNav) settingsNav.style.display = (STATE.user.role === 'Admin') ? '' : 'none';
   loadAll();
 }
 
@@ -101,14 +105,17 @@ async function refreshAll(showToast) {
 
 async function loadAll(showToast) {
   try {
+    const isAdmin = STATE.user && STATE.user.role === 'Admin';
     const [tripsRes, advRes, doersRes, setRes] = await Promise.all([
-      api('GET', '/api/trips'), api('GET', '/api/advance-requests'), api('GET', '/api/doers'), api('GET', '/api/settings')
+      api('GET', '/api/trips'), api('GET', '/api/advance-requests'), api('GET', '/api/doers'),
+      isAdmin ? api('GET', '/api/settings') : Promise.resolve({ settings: {} })
     ]);
     STATE.trips = tripsRes.trips;
     STATE.advances = advRes.requests;
     STATE.doers = doersRes.doers;
     STATE.settings = setRes.settings;
-    renderTrips(); renderAdvances(); renderDoers(); renderSettings();
+    renderTrips(); renderAdvances(); renderDoers();
+    if (isAdmin) renderSettings();
     document.getElementById('count-trips').textContent = STATE.trips.filter(t => t.TripStatus === 'Submitted').length;
     document.getElementById('count-advances').textContent = STATE.advances.filter(a => a.Status === 'Pending').length;
     document.getElementById('count-doers').textContent = STATE.doers.length;
@@ -404,8 +411,10 @@ async function submitSaveSettings() {
   try {
     await api('PUT', '/api/settings', {
       ACCOUNTS_NAME: val('set-accounts-name'),
-      ACCOUNTS_EMAIL: val('set-accounts-email')
+      ACCOUNTS_EMAIL: val('set-accounts-email'),
+      accountsPassword: val('set-accounts-password') || undefined
     });
+    val_set('set-accounts-password', ''); // never leave a typed password sitting in the form after saving
     toast('Settings saved');
   } catch (err) { toast(err.message, true); }
 }

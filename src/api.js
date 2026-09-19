@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
-const { requireLogin, requireAccounts } = require('./auth');
+const { requireLogin, requireAccounts, requireAdmin, upsertAccountsUser } = require('./auth');
 const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
 const { buildVoucherPdf } = require('./voucherPdf');
 const { downloadReceiptFromDrive, uploadVoucherPdfToDrive } = require('./drive');
@@ -271,20 +271,32 @@ function toVoucherJson(v) {
   };
 }
 
-/** ---------- SETTINGS (ACCOUNTS_EMAIL / ACCOUNTS_NAME) ---------- */
+/** ---------- SETTINGS (ACCOUNTS_EMAIL / ACCOUNTS_NAME / Accounts login) ---------- */
+/** Admin-only - Accounts should never see or change these, even via a direct API call. */
 
-router.get('/settings', safe(async (req, res) => {
+router.get('/settings', requireAdmin, safe(async (req, res) => {
   const result = await pool.query('SELECT * FROM settings');
   const settings = {};
   result.rows.forEach(r => { settings[r.key] = r.value; });
   res.json({ ok: true, settings });
 }));
 
-router.put('/settings', safe(async (req, res) => {
-  const updates = req.body; // { KEY: 'value', ... }
-  for (const [key, value] of Object.entries(updates)) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', [key, value]);
+router.put('/settings', requireAdmin, safe(async (req, res) => {
+  const { ACCOUNTS_NAME, ACCOUNTS_EMAIL, accountsPassword } = req.body;
+
+  if (ACCOUNTS_NAME !== undefined) {
+    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['ACCOUNTS_NAME', ACCOUNTS_NAME]);
   }
+  if (ACCOUNTS_EMAIL !== undefined) {
+    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['ACCOUNTS_EMAIL', ACCOUNTS_EMAIL]);
+  }
+
+  // The Accounts login itself (email + password) is managed right here
+  // by Admin - Accounts never sets their own credentials.
+  if (ACCOUNTS_EMAIL) {
+    await upsertAccountsUser(ACCOUNTS_EMAIL, accountsPassword || null);
+  }
+
   res.json({ ok: true });
 }));
 

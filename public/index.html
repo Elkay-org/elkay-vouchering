@@ -126,11 +126,20 @@
       <!-- ===== SETTINGS PAGE ===== -->
       <div class="page" id="page-settings">
         <div class="page-head">
-          <div><h2>Settings</h2><p>Controls the Accounts name/email shown on emails and PDFs.</p></div>
+          <div><h2>Settings</h2><p>Admin only. Controls the Accounts name/email shown on emails and PDFs, and the Accounts login itself.</p></div>
         </div>
         <div style="max-width:420px;">
           <div class="field"><label>Accounts Name</label><input id="set-accounts-name"></div>
-          <div class="field"><label>Accounts Email</label><input type="email" id="set-accounts-email"></div>
+          <div class="field"><label>Accounts Email <span style="font-weight:400;">(also their login email)</span></label><input type="email" id="set-accounts-email"></div>
+          <div class="field"><label>Accounts Password <span style="font-weight:400;">(leave blank to keep unchanged)</span></label>
+            <div class="password-field">
+              <input type="password" id="set-accounts-password" autocomplete="new-password">
+              <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('set-accounts-password', this)" title="Show password">
+                <span class="eye-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 9S4 4 9 4s7.5 5 7.5 5-2.5 5-7.5 5-7.5-5-7.5-5z"/><circle cx="9" cy="9" r="2.2"/></svg></span>
+                <span class="eye-off-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 9S4 4 9 4s7.5 5 7.5 5-2.5 5-7.5 5-7.5-5-7.5-5z"/><circle cx="9" cy="9" r="2.2"/><path d="M2.5 2.5l13 13"/></svg></span>
+              </button>
+            </div>
+          </div>
           <button onclick="submitSaveSettings()">Save Settings</button>
         </div>
       </div>
