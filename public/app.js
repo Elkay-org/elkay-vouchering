@@ -198,6 +198,7 @@ async function openTripDetail(tripCode) {
     const res = await api('GET', `/api/trips/${tripCode}`);
     const t = res.trip;
     const totalVouchers = res.vouchers.reduce((sum, v) => sum + v.Amount, 0);
+    const balance = totalVouchers - t.AdvanceReceived; // positive = owed TO the Doer, negative = owed BY the Doer
     document.getElementById('td-title').textContent = `${t.TripCode} — ${t.DoerName}`;
     document.getElementById('td-body').innerHTML = `
       <div class="grid2" style="margin-bottom:14px;">
@@ -209,6 +210,14 @@ async function openTripDetail(tripCode) {
         <div><label>End Date</label><div>${t.EndDate || '—'}</div></div>
         <div><label>Advance Received</label><div>Rs. ${t.AdvanceReceived.toLocaleString('en-IN')}</div></div>
         <div><label>Total Vouchers</label><div>Rs. ${totalVouchers.toLocaleString('en-IN')}</div></div>
+      </div>
+      <div class="field" style="background:var(--bg-2);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+        <label style="margin-bottom:2px;">Settlement</label>
+        <div style="font-weight:700;font-size:15px;color:${balance === 0 ? 'var(--text-1)' : (balance > 0 ? 'var(--amber-text)' : 'var(--red-text)')};">
+          ${balance === 0 ? 'Fully settled - nothing owed either way' :
+            balance > 0 ? `Company owes ${t.DoerName}: Rs. ${balance.toLocaleString('en-IN')} (reimbursement)` :
+            `${t.DoerName} owes Company: Rs. ${Math.abs(balance).toLocaleString('en-IN')} (unspent advance to return)`}
+        </div>
       </div>
       <div class="field"><label>Purpose of Visit</label><div>${t.PurposeOfVisit}</div></div>
       ${t.ReceiptNotReceivedFor ? `<div class="field"><label>Missing Receipts</label><div style="color:var(--amber-text);">${t.ReceiptNotReceivedFor}</div></div>` : ''}

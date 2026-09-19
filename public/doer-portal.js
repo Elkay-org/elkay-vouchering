@@ -190,6 +190,7 @@ async function openTripView(tripCode) {
 function renderTripView(trip, vouchers) {
   const isOngoing = trip.TripStatus === 'Ongoing';
   const total = vouchers.reduce((sum, v) => sum + v.Amount, 0);
+  const balance = total - trip.AdvanceReceived; // positive = you'll be reimbursed, negative = you owe this back
 
   document.getElementById('tv-title').textContent = `${trip.TripCode} — ${trip.LocationVisited}`;
   document.getElementById('tv-body').innerHTML = `
@@ -201,7 +202,14 @@ function renderTripView(trip, vouchers) {
     </div>
     <div class="field"><label>Purpose</label><div>${trip.PurposeOfVisit}</div></div>
     ${trip.RejectionRemark ? `<div class="field"><label>Accounts' Remark</label><div style="color:var(--red-text);">${trip.RejectionRemark}</div></div>` : ''}
-    <div style="font-size:12.5px;color:var(--text-3);margin-top:6px;">Total vouchers so far: Rs. ${total.toLocaleString('en-IN')}</div>
+    <div style="background:var(--bg-2);border-radius:8px;padding:10px 14px;margin-top:10px;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;margin-bottom:2px;">Settlement</div>
+      <div style="font-weight:700;font-size:14.5px;color:${balance === 0 ? 'var(--text-1)' : (balance > 0 ? 'var(--amber-text)' : 'var(--red-text)')};">
+        ${balance === 0 ? `Vouchers total Rs. ${total.toLocaleString('en-IN')} - fully settled` :
+          balance > 0 ? `You'll be reimbursed Rs. ${balance.toLocaleString('en-IN')} (vouchers exceed your advance)` :
+          `You'll need to return Rs. ${Math.abs(balance).toLocaleString('en-IN')} (unspent advance)`}
+      </div>
+    </div>
   `;
 
   const list = document.getElementById('tv-vouchers-list');
