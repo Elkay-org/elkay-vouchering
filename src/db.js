@@ -48,6 +48,7 @@ async function initSchema() {
       trip_status TEXT DEFAULT 'Ongoing', -- Ongoing / Submitted / Passed / Rejected
       receipt_not_received_for TEXT,
       rejection_remark TEXT,
+      closing_remarks TEXT,
       passed_by TEXT,
       passed_date TEXT,
       created_at TEXT
@@ -94,6 +95,11 @@ async function initSchema() {
   for (const t of tables) {
     await pool.query(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`);
   }
+
+  // Catch-up for a column added after this app was first deployed -
+  // CREATE TABLE IF NOT EXISTS alone doesn't retroactively add columns
+  // to a table that already exists. Safe to run on every startup.
+  await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS closing_remarks TEXT;`);
 
   // Seeds the two Settings keys the first time only - safe to run on
   // every startup, never overwrites a value you've already changed from

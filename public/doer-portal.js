@@ -201,7 +201,8 @@ function renderTripView(trip, vouchers) {
       <div><label>End Date</label><div>${trip.EndDate || '—'}</div></div>
     </div>
     <div class="field"><label>Purpose</label><div>${trip.PurposeOfVisit}</div></div>
-    ${trip.RejectionRemark ? `<div class="field"><label>Accounts' Remark</label><div style="color:var(--red-text);">${trip.RejectionRemark}</div></div>` : ''}
+    ${trip.ClosingRemarks ? `<div class="field"><label>Your Closing Remarks</label><div>${trip.ClosingRemarks}</div></div>` : ''}
+    ${trip.TripStatus === 'Rejected' && trip.RejectionRemark ? `<div class="field"><label>Accounts' Remark</label><div style="color:var(--red-text);">${trip.RejectionRemark}</div></div>` : ''}
     <div style="background:var(--bg-2);border-radius:8px;padding:10px 14px;margin-top:10px;">
       <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;margin-bottom:2px;">Settlement</div>
       <div style="font-weight:700;font-size:14.5px;color:${balance === 0 ? 'var(--text-1)' : (balance > 0 ? 'var(--amber-text)' : 'var(--red-text)')};">

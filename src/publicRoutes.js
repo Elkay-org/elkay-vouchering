@@ -29,17 +29,43 @@ async function getActiveDoer(doerCode) {
   return result.rows[0] || null;
 }
 
-/** Available advance balance = approved advances minus advance actually drawn on trips. */
+/**
+ * Available advance balance, as a single running number:
+ * (all approved advances) minus (advance tied up in trips still in
+ * progress) minus (advance actually spent on trips Accounts has
+ * finalized/Passed).
+ *
+ * While a trip is Ongoing/Submitted/Rejected, its full advance stays
+ * reserved - the final voucher total isn't locked in yet. Only once
+ * Accounts Passes a trip do we know the true spend, and any unspent
+ * portion (advance_received minus that trip's vouchers) automatically
+ * flows back into this balance - no separate "return this" step to
+ * track, it just becomes available again for the next trip.
+ */
 async function getAvailableBalance(doerCode) {
   const approvedResult = await pool.query(
     "SELECT COALESCE(SUM(approved_amount), 0) as total FROM advance_requests WHERE doer_code = $1 AND status = 'Approved'",
     [doerCode]
   );
-  const drawnResult = await pool.query(
-    "SELECT COALESCE(SUM(advance_received), 0) as total FROM trips WHERE doer_code = $1",
+
+  const reservedResult = await pool.query(
+    "SELECT COALESCE(SUM(advance_received), 0) as total FROM trips WHERE doer_code = $1 AND trip_status IN ('Ongoing', 'Submitted', 'Rejected')",
     [doerCode]
   );
-  return Number(approvedResult.rows[0].total) - Number(drawnResult.rows[0].total);
+
+  const passedResult = await pool.query(`
+    SELECT t.advance_received, COALESCE(SUM(v.amount), 0) as voucher_total
+    FROM trips t LEFT JOIN vouchers v ON v.trip_code = t.trip_code
+    WHERE t.doer_code = $1 AND t.trip_status = 'Passed'
+    GROUP BY t.trip_code, t.advance_received
+  `, [doerCode]);
+  const spentOnPassedTrips = passedResult.rows.reduce((sum, r) => {
+    // Capped at the advance itself - overspending on a trip doesn't
+    // create extra available balance, it's just reimbursed separately.
+    return sum + Math.min(Number(r.advance_received), Number(r.voucher_total));
+  }, 0);
+
+  return Number(approvedResult.rows[0].total) - Number(reservedResult.rows[0].total) - spentOnPassedTrips;
 }
 
 async function getAccountsEmail() {
@@ -275,9 +301,9 @@ router.post('/doer/:doerCode/trip/:tripCode/submit', async (req, res) => {
     if (!endDate) return res.status(400).json({ ok: false, error: 'End date is required.' });
 
     const result = await pool.query(
-      `UPDATE trips SET end_date = $1, trip_status = 'Submitted', rejection_remark = COALESCE(rejection_remark, '') || $2
+      `UPDATE trips SET end_date = $1, trip_status = 'Submitted', closing_remarks = $2
        WHERE trip_code = $3 RETURNING *`,
-      [formatDate(endDate), closingRemarks ? (' | Closing remarks: ' + closingRemarks) : '', req.params.tripCode]
+      [formatDate(endDate), closingRemarks || null, req.params.tripCode]
     );
 
     const doerResult = await pool.query('SELECT doer_name FROM doers WHERE doer_code = $1', [req.params.doerCode]);
@@ -297,7 +323,7 @@ function toTripJson(t) {
     TripCode: t.trip_code, InitiatedBy: t.initiated_by, DoerCode: t.doer_code, Vertical: t.vertical,
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
-    ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark,
+    ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }

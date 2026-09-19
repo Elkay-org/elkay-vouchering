@@ -175,7 +175,7 @@ function toTripJson(t) {
     TripCode: t.trip_code, InitiatedBy: t.initiated_by, DoerCode: t.doer_code, Vertical: t.vertical,
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
-    ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark,
+    ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }
