@@ -1,8 +1,9 @@
 const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
-const { uploadReceiptToDrive, isDriveConfigured } = require('./drive');
+const { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive } = require('./drive');
 const { sendAdvanceRequestNotification, sendTripSubmittedNotification } = require('./mailer');
+const { buildVoucherPdf } = require('./voucherPdf');
 
 const router = express.Router();
 
@@ -119,7 +120,8 @@ router.post('/doer/:doerCode/advance-request', async (req, res) => {
     );
 
     const accountsEmail = await getAccountsEmail();
-    sendAdvanceRequestNotification(accountsEmail, doer.doer_name, requestId, purpose, requestedAmount)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    sendAdvanceRequestNotification(accountsEmail, doer.doer_name, requestId, purpose, requestedAmount, baseUrl)
       .catch(err => console.error('Advance request notification failed:', err.message));
 
     res.json({ ok: true, record: toAdvanceJson(result.rows[0]) });
@@ -198,6 +200,47 @@ router.get('/doer/:doerCode/trip/:tripCode', async (req, res) => {
     }
     const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
     res.json({ ok: true, trip: toTripJson(trip), vouchers: vouchersResult.rows.map(toVoucherJson) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * Lets a Doer download a PDF of their own trip at any point - purely
+ * a direct download, generated fresh each time. Unlike the copy
+ * Accounts gets when they Pass a trip, this one is NOT saved to
+ * Drive - it's just for the Doer's own reference.
+ */
+router.get('/doer/:doerCode/trip/:tripCode/pdf', async (req, res) => {
+  try {
+    const tripResult = await pool.query(`
+      SELECT t.*, d.doer_name, d.email FROM trips t JOIN doers d ON d.doer_code = t.doer_code WHERE t.trip_code = $1
+    `, [req.params.tripCode]);
+    const trip = tripResult.rows[0];
+    if (!trip || trip.doer_code !== req.params.doerCode) {
+      return res.status(404).json({ ok: false, error: 'Trip not found.' });
+    }
+    const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
+    const vouchers = vouchersResult.rows.map(toVoucherJson);
+
+    const withPhotos = vouchers.filter(v => v.ReceiptPhotoURL);
+    const fetched = await Promise.all(
+      withPhotos.map(v => downloadReceiptFromDrive(v.ReceiptPhotoURL).then(buffer => ({ voucherId: v.VoucherID, buffer })))
+    );
+    const receiptImages = fetched.filter(r => r.buffer);
+
+    const pdfBuffer = await buildVoucherPdf({
+      trip: toTripJson(trip),
+      doer: { DoerName: trip.doer_name, Email: trip.email },
+      vouchers,
+      passedBy: trip.passed_by,
+      receiptImages
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Petty Cash Voucher - ${trip.trip_code}.pdf"`);
+    res.send(pdfBuffer);
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: err.message });
@@ -312,7 +355,8 @@ router.post('/doer/:doerCode/trip/:tripCode/submit', async (req, res) => {
 
     const doerResult = await pool.query('SELECT doer_name FROM doers WHERE doer_code = $1', [req.params.doerCode]);
     const accountsEmail = await getAccountsEmail();
-    sendTripSubmittedNotification(accountsEmail, doerResult.rows[0] ? doerResult.rows[0].doer_name : req.params.doerCode, req.params.tripCode, trip.location_visited)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    sendTripSubmittedNotification(accountsEmail, doerResult.rows[0] ? doerResult.rows[0].doer_name : req.params.doerCode, req.params.tripCode, trip.location_visited, baseUrl)
       .catch(err => console.error('Trip submitted notification failed:', err.message));
 
     res.json({ ok: true, record: toTripJson(result.rows[0]) });

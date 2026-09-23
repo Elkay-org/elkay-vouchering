@@ -3,8 +3,8 @@ const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
 const { requireLogin, requireAccounts, requireAdmin, upsertAccountsUser } = require('./auth');
 const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
-const { buildVoucherPdf } = require('./voucherPdf');
-const { downloadReceiptFromDrive, uploadVoucherPdfToDrive } = require('./drive');
+const { uploadVoucherPdfToDrive } = require('./drive');
+const { buildTripPdfBuffer } = require('./pdfHelper');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -79,7 +79,8 @@ router.post('/advance-requests/:requestId/decide', requireAccounts, safe(async (
   const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [request.doer_code]);
   const doer = doerResult.rows[0];
   if (doer) {
-    sendAdvanceDecisionToDoer(doer.email, doer.doer_name, req.params.requestId, approved, finalApprovedAmount, req.session.user.email)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    sendAdvanceDecisionToDoer(doer.email, doer.doer_name, req.params.requestId, approved, finalApprovedAmount, req.session.user.email, baseUrl)
       .catch(err => console.error('Advance decision email failed:', err.message));
   }
 
@@ -125,30 +126,6 @@ router.get('/trips/:tripCode', safe(async (req, res) => {
 // Downloads the Petty Cash Voucher PDF, matching Elkay's paper format -
 // available at any trip status, matching the original design ("Accounts
 // can download a PDF at any point").
-/** Builds the voucher PDF buffer for a trip - shared by the download route and the auto-save-on-Pass step. */
-async function buildTripPdfBuffer(trip, doerName, doerEmail) {
-  const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [trip.trip_code]);
-  const vouchers = vouchersResult.rows.map(toVoucherJson);
-
-  // Fetch every receipt photo in parallel (not one at a time) so this
-  // stays fast even with several vouchers - one failed/missing photo
-  // just gets skipped rather than breaking the whole PDF.
-  const withPhotos = vouchers.filter(v => v.ReceiptPhotoURL);
-  const fetched = await Promise.all(
-    withPhotos.map(v => downloadReceiptFromDrive(v.ReceiptPhotoURL).then(buffer => ({ voucherId: v.VoucherID, buffer })))
-  );
-  const receiptImages = fetched.filter(r => r.buffer); // drop any that failed to download
-
-  const pdfBuffer = await buildVoucherPdf({
-    trip: toTripJson(trip),
-    doer: { DoerName: doerName, Email: doerEmail },
-    vouchers,
-    passedBy: trip.passed_by,
-    receiptImages
-  });
-  return pdfBuffer;
-}
-
 router.get('/trips/:tripCode/pdf', safe(async (req, res) => {
   const tripResult = await pool.query(`
     SELECT t.*, d.doer_name, d.email FROM trips t JOIN doers d ON d.doer_code = t.doer_code WHERE t.trip_code = $1
@@ -179,7 +156,8 @@ router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
   const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
   const doer = doerResult.rows[0];
   if (doer) {
-    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, true, null, req.session.user.email)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, true, null, req.session.user.email, baseUrl)
       .catch(err => console.error('Trip pass email failed:', err.message));
   }
 
@@ -224,7 +202,8 @@ router.post('/trips/:tripCode/reject', requireAccounts, safe(async (req, res) =>
   const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
   const doer = doerResult.rows[0];
   if (doer) {
-    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, false, remark, req.session.user.email)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    sendTripDecisionToDoer(doer.email, doer.doer_name, req.params.tripCode, false, remark, req.session.user.email, baseUrl)
       .catch(err => console.error('Trip reject email failed:', err.message));
   }
 

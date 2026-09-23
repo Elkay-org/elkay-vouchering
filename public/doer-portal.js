@@ -233,13 +233,14 @@ function renderTripView(trip, vouchers) {
 
   document.getElementById('tv-add-voucher-btn').style.display = isOngoing ? '' : 'none';
 
+  const pdfBtn = `<button class="secondary" onclick="window.open('/api/public/doer/${DOER_CODE}/trip/${trip.TripCode}/pdf', '_blank')">Download PDF</button>`;
   const actions = document.getElementById('tv-actions');
   if (isOngoing) {
-    actions.innerHTML = `
+    actions.innerHTML = pdfBtn + `
       <button class="secondary" onclick="closeModal('modal-trip-view')">Close</button>
       <button onclick="openSubmitTrip()">Submit Trip</button>`;
   } else {
-    actions.innerHTML = `<button class="secondary" onclick="closeModal('modal-trip-view')">Close</button>`;
+    actions.innerHTML = pdfBtn + `<button class="secondary" onclick="closeModal('modal-trip-view')">Close</button>`;
   }
 }
 

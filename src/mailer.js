@@ -75,7 +75,7 @@ async function sendMail({ to, subject, text, senderEmail }) {
 
 /** ---------- ADVANCE REQUESTS ---------- */
 
-async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId, purpose, amount) {
+async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId, purpose, amount, baseUrl) {
   if (!accountsEmail) return;
   await sendMail({
     to: accountsEmail,
@@ -83,43 +83,47 @@ async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId
     text: `Hi,\n\n${doerName} has requested a cash advance.\n\n` +
       `Request ID: ${requestId}\nPurpose: ${purpose || 'Not specified'}\n` +
       `Amount Requested: Rs. ${Number(amount).toLocaleString('en-IN')}\n\n` +
-      `Please review and decide in the dashboard.`
+      `Please review and decide in the dashboard.` +
+      (baseUrl ? `\n\nOpen the dashboard: ${baseUrl}/` : '')
   });
 }
 
-async function sendAdvanceDecisionToDoer(doerEmail, doerName, requestId, approved, approvedAmount, senderEmail) {
+async function sendAdvanceDecisionToDoer(doerEmail, doerName, requestId, approved, approvedAmount, senderEmail, baseUrl) {
   if (!doerEmail) return;
   await sendMail({
     to: doerEmail,
     subject: `Advance Request ${approved ? 'Approved' : 'Rejected'} - ${requestId}`,
     text: `Hi ${doerName},\n\nYour advance request (${requestId}) has been ${approved ? 'approved' : 'rejected'}.` +
       (approved ? `\n\nApproved Amount: Rs. ${Number(approvedAmount).toLocaleString('en-IN')}` : '') +
-      `\n\nYou can view this anytime in the Vouchering portal.`,
+      `\n\nYou can view this anytime in the Vouchering portal.` +
+      (baseUrl ? `\n\nOpen your portal: ${baseUrl}/doer-portal.html` : ''),
     senderEmail
   });
 }
 
 /** ---------- TRIPS ---------- */
 
-async function sendTripSubmittedNotification(accountsEmail, doerName, tripCode, location) {
+async function sendTripSubmittedNotification(accountsEmail, doerName, tripCode, location, baseUrl) {
   if (!accountsEmail) return;
   await sendMail({
     to: accountsEmail,
     subject: `Trip Submitted for Review - ${tripCode}`,
     text: `Hi,\n\n${doerName} has submitted a trip for review.\n\n` +
       `Trip Code: ${tripCode}\nLocation: ${location}\n\n` +
-      `Please review and Pass/Reject in the dashboard.`
+      `Please review and Pass/Reject in the dashboard.` +
+      (baseUrl ? `\n\nOpen the dashboard: ${baseUrl}/` : '')
   });
 }
 
-async function sendTripDecisionToDoer(doerEmail, doerName, tripCode, approved, remark, senderEmail) {
+async function sendTripDecisionToDoer(doerEmail, doerName, tripCode, approved, remark, senderEmail, baseUrl) {
   if (!doerEmail) return;
   await sendMail({
     to: doerEmail,
     subject: `Trip ${approved ? 'Passed' : 'Rejected'} - ${tripCode}`,
     text: `Hi ${doerName},\n\nYour trip (${tripCode}) has been ${approved ? 'passed and finalized' : 'rejected'}.` +
       (!approved && remark ? `\n\nRemark: ${remark}\n\nYou can reopen and correct it in the Vouchering portal.` : '') +
-      (approved ? `\n\nThank you.` : ''),
+      (approved ? `\n\nThank you.` : '') +
+      (baseUrl ? `\n\nOpen your portal: ${baseUrl}/doer-portal.html` : ''),
     senderEmail
   });
 }
