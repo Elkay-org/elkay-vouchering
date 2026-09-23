@@ -160,4 +160,34 @@ async function uploadVoucherPdfToDrive(buffer, tripCode) {
   return file.data.webViewLink;
 }
 
-module.exports = { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive, uploadVoucherPdfToDrive };
+/**
+ * Uploads the weekly summary report Excel file to its own "Weekly
+ * Reports" subfolder - kept separate from receipts and vouchers.
+ */
+async function uploadReportToDrive(buffer, filename) {
+  const drive = getDriveClient();
+  if (!drive) return null;
+
+  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!rootFolderId) throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set');
+
+  const folderId = await getOrCreateSubfolder('Weekly Reports', rootFolderId);
+  const stream = Readable.from(buffer);
+
+  const file = await drive.files.create({
+    requestBody: { name: filename, parents: [folderId] },
+    media: { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: stream },
+    fields: 'id, webViewLink',
+    supportsAllDrives: true
+  });
+
+  await drive.permissions.create({
+    fileId: file.data.id,
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true
+  });
+
+  return file.data.webViewLink;
+}
+
+module.exports = { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive, uploadVoucherPdfToDrive, uploadReportToDrive };

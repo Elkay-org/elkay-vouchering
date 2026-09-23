@@ -3,8 +3,9 @@ const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
 const { requireLogin, requireAccounts, requireAdmin, upsertAccountsUser } = require('./auth');
 const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer');
-const { uploadVoucherPdfToDrive } = require('./drive');
+const { uploadVoucherPdfToDrive, uploadReportToDrive } = require('./drive');
 const { buildTripPdfBuffer } = require('./pdfHelper');
+const { buildWeeklyReportBuffer } = require('./reportHelper');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -146,11 +147,31 @@ router.post('/trips/:tripCode/pass', requireAccounts, safe(async (req, res) => {
   if (!trip) return res.status(404).json({ ok: false, error: 'Trip not found.' });
   if (trip.trip_status !== 'Submitted') return res.status(400).json({ ok: false, error: 'Only submitted trips can be passed.' });
 
+  // If there's unspent advance on this trip, Accounts must say whether
+  // the Doer physically returned it before we can finalize - this
+  // directly decides whether that amount stays usable for their next
+  // trip (see getAvailableBalance() in publicRoutes.js).
+  const voucherTotalResult = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM vouchers WHERE trip_code = $1', [req.params.tripCode]);
+  const voucherTotal = Number(voucherTotalResult.rows[0].total);
+  const advance = Number(trip.advance_received || 0);
+  const remainingBalance = advance - voucherTotal;
+
+  let advanceReturned = null;
+  if (remainingBalance > 0) {
+    if (req.body.advanceReturned === undefined || req.body.advanceReturned === null) {
+      return res.status(400).json({
+        ok: false, error: 'ADVANCE_RETURNED_REQUIRED',
+        remainingBalance, message: `Did the Doer return the remaining Rs. ${remainingBalance.toLocaleString('en-IN')}?`
+      });
+    }
+    advanceReturned = req.body.advanceReturned ? 'Y' : 'N';
+  }
+
   const now = formatDate(new Date());
   const passedBy = req.session.user.name || req.session.user.email;
   let result = await pool.query(
-    "UPDATE trips SET trip_status = 'Passed', passed_by = $1, passed_date = $2 WHERE trip_code = $3 RETURNING *",
-    [passedBy, now, req.params.tripCode]
+    "UPDATE trips SET trip_status = 'Passed', passed_by = $1, passed_date = $2, advance_returned = $3 WHERE trip_code = $4 RETURNING *",
+    [passedBy, now, advanceReturned, req.params.tripCode]
   );
 
   const doerResult = await pool.query('SELECT doer_name, email FROM doers WHERE doer_code = $1', [trip.doer_code]);
@@ -237,7 +258,7 @@ function toTripJson(t) {
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
     ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
-    VoucherPdfDriveLink: t.voucher_pdf_drive_link,
+    VoucherPdfDriveLink: t.voucher_pdf_drive_link, AdvanceReturned: t.advance_returned,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }
@@ -249,6 +270,29 @@ function toVoucherJson(v) {
     ReceiptPhotoURL: v.receipt_photo_url, NoReceiptReason: v.no_receipt_reason, CreatedAt: v.created_at
   };
 }
+
+/** ---------- REPORTS ---------- */
+
+// Generates the weekly person-wise summary report and saves it to Drive
+// - Accounts uses this to hand a clean summary to their boss. Returns
+// the computed numbers directly too, so the dashboard can show them
+// immediately without a separate fetch.
+router.post('/reports/weekly', requireAccounts, safe(async (req, res) => {
+  const { start, end } = req.body;
+  if (!start || !end) return res.status(400).json({ ok: false, error: 'Start and end dates are required.' });
+
+  const { buffer, doerRows, totals, tripCount } = await buildWeeklyReportBuffer(start, end);
+  const filename = `Weekly Report ${start} to ${end}.xlsx`;
+
+  let driveLink = null;
+  try {
+    driveLink = await uploadReportToDrive(buffer, filename);
+  } catch (err) {
+    console.error('Could not save weekly report to Drive:', err.message);
+  }
+
+  res.json({ ok: true, driveLink, doerRows, totals, tripCount });
+}));
 
 /** ---------- SETTINGS (ACCOUNTS_EMAIL / ACCOUNTS_NAME / Accounts login) ---------- */
 /** Admin-only - Accounts should never see or change these, even via a direct API call. */

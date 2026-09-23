@@ -55,15 +55,21 @@ async function getAvailableBalance(doerCode) {
   );
 
   const passedResult = await pool.query(`
-    SELECT t.advance_received, COALESCE(SUM(v.amount), 0) as voucher_total
+    SELECT t.advance_received, t.advance_returned, COALESCE(SUM(v.amount), 0) as voucher_total
     FROM trips t LEFT JOIN vouchers v ON v.trip_code = t.trip_code
     WHERE t.doer_code = $1 AND t.trip_status = 'Passed'
-    GROUP BY t.trip_code, t.advance_received
+    GROUP BY t.trip_code, t.advance_received, t.advance_returned
   `, [doerCode]);
   const spentOnPassedTrips = passedResult.rows.reduce((sum, r) => {
-    // Capped at the advance itself - overspending on a trip doesn't
-    // create extra available balance, it's just reimbursed separately.
-    return sum + Math.min(Number(r.advance_received), Number(r.voucher_total));
+    const advance = Number(r.advance_received);
+    const vouchers = Number(r.voucher_total);
+    if (vouchers >= advance) return sum + advance; // fully spent or overspent either way - nothing left over
+    // There's a remaining balance. If Accounts confirmed the Doer
+    // physically returned it, the FULL advance counts as accounted
+    // for - it doesn't stay usable. If not confirmed (or not yet
+    // asked), only the spent portion is removed, so the rest keeps
+    // rolling forward as available, same as before.
+    return sum + (r.advance_returned === 'Y' ? advance : vouchers);
   }, 0);
 
   return Number(approvedResult.rows[0].total) - Number(reservedResult.rows[0].total) - spentOnPassedTrips;
@@ -372,7 +378,7 @@ function toTripJson(t) {
     LocationVisited: t.location_visited, StartDate: t.start_date, PurposeOfVisit: t.purpose_of_visit,
     AdvanceReceived: Number(t.advance_received || 0), EndDate: t.end_date, TripStatus: t.trip_status,
     ReceiptNotReceivedFor: t.receipt_not_received_for, RejectionRemark: t.rejection_remark, ClosingRemarks: t.closing_remarks,
-    VoucherPdfDriveLink: t.voucher_pdf_drive_link,
+    VoucherPdfDriveLink: t.voucher_pdf_drive_link, AdvanceReturned: t.advance_returned,
     PassedBy: t.passed_by, PassedDate: t.passed_date, CreatedAt: t.created_at
   };
 }

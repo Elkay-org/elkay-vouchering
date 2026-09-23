@@ -49,6 +49,10 @@
         <span class="side-label">Doers</span>
         <span class="side-count" id="count-doers">0</span>
       </div>
+      <div class="side-item" data-page="reports">
+        <span class="side-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15V9M8 15V4M13 15v-6.5"/><path d="M2 15h14"/></svg></span>
+        <span class="side-label">Reports</span>
+      </div>
       <div class="side-item" data-page="settings">
         <span class="side-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="2.3"/><path d="M9 2.3v1.7M9 14v1.7M15.7 9h-1.7M3.7 9H2M13.5 4.5l-1.2 1.2M5.7 12.3l-1.2 1.2M13.5 13.5l-1.2-1.2M5.7 5.7L4.5 4.5"/></svg></span>
         <span class="side-label">Settings</span>
@@ -124,6 +128,32 @@
       </div>
 
       <!-- ===== SETTINGS PAGE ===== -->
+      <!-- ===== REPORTS PAGE ===== -->
+      <div class="page" id="page-reports">
+        <div class="page-head">
+          <div><h2>Reports</h2><p>A person-wise summary of what was passed each week - saved to Drive automatically.</p></div>
+        </div>
+        <div style="max-width:420px;margin-bottom:20px;">
+          <div class="grid2">
+            <div class="field"><label>Week Starting</label><input type="date" id="rpt-start" onchange="onReportStartChange()"></div>
+            <div class="field"><label>Week Ending</label><input type="date" id="rpt-end"></div>
+          </div>
+          <button onclick="submitGenerateReport()" id="rpt-generate-btn">Generate Report</button>
+        </div>
+        <div id="rpt-results" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h3 style="font-size:14px;margin:0;">Summary (<span id="rpt-trip-count">0</span> trips passed)</h3>
+            <a class="doc-link" id="rpt-drive-link" href="#" target="_blank">Open in Drive</a>
+          </div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Doer</th><th>Trips</th><th>Advance Disbursed</th><th>Total Expenses</th><th>Reimbursement Paid</th><th>Confirmed Returned</th><th>Still Outstanding</th></tr></thead>
+              <tbody id="rpt-summary-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div class="page" id="page-settings">
         <div class="page-head">
           <div><h2>Settings</h2><p>Admin only. Controls the Accounts name/email shown on emails and PDFs, and the Accounts login itself.</p></div>
@@ -206,6 +236,19 @@
       <div class="modal-actions">
         <button class="secondary" onclick="closeModal('modal-reject-trip')">Cancel</button>
         <button onclick="submitRejectTrip()">Reject Trip</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="modal-advance-returned">
+    <div class="modal">
+      <h3>Before Passing This Trip</h3>
+      <input type="hidden" id="ar-tripcode">
+      <p class="sub" id="ar-message" style="margin-bottom:16px;"></p>
+      <p class="sub" style="margin-bottom:16px;">If Yes, this amount will no longer count toward their available balance. If No, it stays available for their next trip, since they still physically have it.</p>
+      <div class="modal-actions">
+        <button class="secondary" onclick="submitPassWithReturn(false)">No, Not Returned</button>
+        <button onclick="submitPassWithReturn(true)">Yes, Returned</button>
       </div>
     </div>
   </div>

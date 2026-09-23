@@ -1,4 +1,5 @@
 let STATE = { trips: [], advances: [], doers: [], settings: {}, user: null, tripStatusFilter: null };
+let CURRENT_TRIP_REMAINING = 0; // unspent advance on the trip currently open in the detail modal, if any
 
 function toast(msg, isError) {
   const t = document.getElementById('toast');
@@ -163,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 15000);
 });
 
-const PAGE_TITLES = { trips: 'Trips', advances: 'Advance Requests', doers: 'Doers', settings: 'Settings' };
+const PAGE_TITLES = { trips: 'Trips', advances: 'Advance Requests', doers: 'Doers', reports: 'Reports', settings: 'Settings' };
 function showPage(page) {
   document.querySelectorAll('.side-item[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page));
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
@@ -214,6 +215,7 @@ async function openTripDetail(tripCode) {
     const t = res.trip;
     const totalVouchers = res.vouchers.reduce((sum, v) => sum + v.Amount, 0);
     const balance = totalVouchers - t.AdvanceReceived; // positive = owed TO the Doer, negative = owed BY the Doer
+    CURRENT_TRIP_REMAINING = balance < 0 ? Math.abs(balance) : 0;
     document.getElementById('td-title').textContent = `${t.TripCode} — ${t.DoerName}`;
     document.getElementById('td-body').innerHTML = `
       <div class="grid2" style="margin-bottom:14px;">
@@ -233,6 +235,9 @@ async function openTripDetail(tripCode) {
             balance > 0 ? `Company owes ${t.DoerName}: Rs. ${balance.toLocaleString('en-IN')} (reimbursement)` :
             `${t.DoerName} owes Company: Rs. ${Math.abs(balance).toLocaleString('en-IN')} (unspent advance to return)`}
         </div>
+        ${t.TripStatus === 'Passed' && balance < 0 ? `<div style="margin-top:6px;font-size:12.5px;color:${t.AdvanceReturned === 'Y' ? 'var(--green-text)' : 'var(--amber-text)'};">
+          ${t.AdvanceReturned === 'Y' ? '✓ Confirmed returned - no longer counted in their available balance' : '⚠ Not yet returned - still counted as available for their next trip'}
+        </div>` : ''}
       </div>
       <div class="field"><label>Purpose of Visit</label><div>${t.PurposeOfVisit}</div></div>
       ${t.VoucherPdfDriveLink ? `<div class="field"><label>Saved Voucher PDF</label><div><a class="doc-link" href="${t.VoucherPdfDriveLink}" target="_blank">View Saved PDF</a></div></div>` : ''}
@@ -268,8 +273,25 @@ async function openTripDetail(tripCode) {
 }
 
 async function submitPassTrip(tripCode) {
+  if (CURRENT_TRIP_REMAINING > 0) {
+    val_set('ar-tripcode', tripCode);
+    document.getElementById('ar-message').textContent = `Did the Doer return the remaining Rs. ${CURRENT_TRIP_REMAINING.toLocaleString('en-IN')}?`;
+    openModal('modal-advance-returned');
+    return;
+  }
+  await passTripNow(tripCode, null);
+}
+
+async function submitPassWithReturn(returned) {
+  const tripCode = val('ar-tripcode');
+  closeModal('modal-advance-returned');
+  await passTripNow(tripCode, returned);
+}
+
+async function passTripNow(tripCode, advanceReturned) {
   try {
-    await api('POST', `/api/trips/${tripCode}/pass`, {});
+    const body = advanceReturned === null ? {} : { advanceReturned };
+    await api('POST', `/api/trips/${tripCode}/pass`, body);
     closeModal('modal-trip-detail');
     toast('Trip passed');
     loadAll();
@@ -398,6 +420,63 @@ async function submitEditDoer() {
     toast('Doer updated');
     loadAll();
   } catch (err) { toast(err.message, true); }
+}
+
+/* ---------------- REPORTS ---------------- */
+
+function onReportStartChange() {
+  const start = val('rpt-start');
+  if (!start) return;
+  const startDate = new Date(start + 'T00:00:00');
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 6);
+  val_set('rpt-end', endDate.toISOString().slice(0, 10));
+}
+
+async function submitGenerateReport() {
+  const start = val('rpt-start'), end = val('rpt-end');
+  if (!start || !end) { toast('Pick both a start and end date', true); return; }
+  if (end < start) { toast('End date cannot be before the start date', true); return; }
+
+  const btn = document.getElementById('rpt-generate-btn');
+  const originalText = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generating...';
+  try {
+    const res = await api('POST', '/api/reports/weekly', { start, end });
+    document.getElementById('rpt-trip-count').textContent = res.tripCount;
+    const driveLinkEl = document.getElementById('rpt-drive-link');
+    if (res.driveLink) { driveLinkEl.href = res.driveLink; driveLinkEl.style.display = ''; }
+    else { driveLinkEl.style.display = 'none'; }
+
+    const tbody = document.getElementById('rpt-summary-body');
+    if (!res.doerRows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No trips were passed in this week.</td></tr>';
+    } else {
+      const rows = res.doerRows.map(d => `
+        <tr>
+          <td>${d.doerName}</td><td>${d.trips}</td>
+          <td>Rs. ${d.advanceDisbursed.toLocaleString('en-IN')}</td>
+          <td>Rs. ${d.totalExpenses.toLocaleString('en-IN')}</td>
+          <td>Rs. ${d.reimbursementPaid.toLocaleString('en-IN')}</td>
+          <td>Rs. ${d.confirmedReturned.toLocaleString('en-IN')}</td>
+          <td style="${d.stillOutstanding > 0 ? 'color:var(--amber-text);font-weight:700;' : ''}">Rs. ${d.stillOutstanding.toLocaleString('en-IN')}</td>
+        </tr>`).join('');
+      const t = res.totals;
+      const totalsRow = `
+        <tr style="font-weight:700;background:var(--bg-2);">
+          <td>TOTAL</td><td>${t.trips}</td>
+          <td>Rs. ${t.advanceDisbursed.toLocaleString('en-IN')}</td>
+          <td>Rs. ${t.totalExpenses.toLocaleString('en-IN')}</td>
+          <td>Rs. ${t.reimbursementPaid.toLocaleString('en-IN')}</td>
+          <td>Rs. ${t.confirmedReturned.toLocaleString('en-IN')}</td>
+          <td style="${t.stillOutstanding > 0 ? 'color:var(--amber-text);' : ''}">Rs. ${t.stillOutstanding.toLocaleString('en-IN')}</td>
+        </tr>`;
+      tbody.innerHTML = rows + totalsRow;
+    }
+    document.getElementById('rpt-results').style.display = '';
+    toast(res.driveLink ? 'Report generated and saved to Drive' : 'Report generated (Drive save failed - check logs)');
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false; btn.textContent = originalText;
 }
 
 /* ---------------- SETTINGS ---------------- */
