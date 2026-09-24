@@ -62,7 +62,7 @@
         <b id="userboxName"></b>
         <span id="userboxRole"></span>
         <div style="margin-top:10px;display:flex;flex-direction:column;align-items:center;gap:8px;">
-          <button class="secondary small" onclick="openModal('modal-change-password')" title="Change Password">
+          <button class="secondary small" id="changePasswordBtn" onclick="openModal('modal-change-password')" title="Change Password">
             <span class="btn-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6.5" r="3"/><path d="M8.8 8.8L15.5 15.5"/><path d="M12.5 11.5l1.5 1.5"/><path d="M11 13l1.5 1.5"/></svg></span>
             <span class="btn-label">Change Password</span>
           </button>
@@ -171,6 +171,24 @@
             </div>
           </div>
           <button onclick="submitSaveSettings()">Save Settings</button>
+        </div>
+
+        <h3 style="margin:28px 0 6px;">CC List for Advance Emails</h3>
+        <p style="color:var(--text-3);font-size:12.5px;margin-top:0;margin-bottom:10px;">
+          These people are CC'd on every "New Advance Request" and "Advance Decision" email - nothing else.
+        </p>
+        <div style="max-width:420px;background:var(--bg-1);border:1px solid var(--line-soft);border-radius:10px;padding:16px;margin-bottom:16px;">
+          <div class="grid2">
+            <div class="field"><label>Name (optional)</label><input id="cc-name" placeholder="e.g. Rakesh Sir"></div>
+            <div class="field"><label>Email</label><input type="email" id="cc-email" placeholder="name@idett.co.in"></div>
+          </div>
+          <button onclick="submitAddCcRecipient()">Add</button>
+        </div>
+        <div class="tablewrap" style="max-width:420px;">
+          <table>
+            <thead><tr><th>Name</th><th>Email</th><th></th></tr></thead>
+            <tbody id="tbl-cc-recipients-body"></tbody>
+          </table>
         </div>
       </div>
     </main>

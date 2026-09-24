@@ -81,7 +81,9 @@ router.post('/advance-requests/:requestId/decide', requireAccounts, safe(async (
   const doer = doerResult.rows[0];
   if (doer) {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    sendAdvanceDecisionToDoer(doer.email, doer.doer_name, req.params.requestId, approved, finalApprovedAmount, req.session.user.email, baseUrl)
+    const ccResult = await pool.query('SELECT email FROM advance_cc_recipients');
+    const ccList = ccResult.rows.map(r => r.email).filter(Boolean);
+    sendAdvanceDecisionToDoer(doer.email, doer.doer_name, req.params.requestId, approved, finalApprovedAmount, req.session.user.email, baseUrl, ccList)
       .catch(err => console.error('Advance decision email failed:', err.message));
   }
 
@@ -292,6 +294,29 @@ router.post('/reports/weekly', requireAccounts, safe(async (req, res) => {
   }
 
   res.json({ ok: true, driveLink, doerRows, totals, tripCount });
+}));
+
+/** ---------- ADVANCE EMAIL CC LIST (Admin-managed, like HRMS's "Always Notify") ---------- */
+
+router.get('/advance-cc-recipients', requireAdmin, safe(async (req, res) => {
+  const result = await pool.query('SELECT * FROM advance_cc_recipients ORDER BY id');
+  res.json({ ok: true, recipients: result.rows.map(r => ({ Id: r.id, Name: r.name, Email: r.email })) });
+}));
+
+router.post('/advance-cc-recipients', requireAdmin, safe(async (req, res) => {
+  const { name, email } = req.body;
+  if (!email) return res.status(400).json({ ok: false, error: 'Email is required' });
+  const now = formatDate(new Date());
+  const result = await pool.query(
+    'INSERT INTO advance_cc_recipients (name, email, added_at) VALUES ($1, $2, $3) RETURNING *',
+    [name || '', email, now]
+  );
+  res.json({ ok: true, recipient: { Id: result.rows[0].id, Name: result.rows[0].name, Email: result.rows[0].email } });
+}));
+
+router.delete('/advance-cc-recipients/:id', requireAdmin, safe(async (req, res) => {
+  await pool.query('DELETE FROM advance_cc_recipients WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
 }));
 
 /** ---------- SETTINGS (ACCOUNTS_EMAIL / ACCOUNTS_NAME / Accounts login) ---------- */

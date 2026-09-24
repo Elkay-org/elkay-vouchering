@@ -108,6 +108,19 @@ async function initSchema() {
   // this changes whether the leftover counts as still-available.
   await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS advance_returned TEXT;`);
 
+  // A manageable CC list for the two advance-related emails (New
+  // Advance Request, Advance Decision) - matching HRMS's "Always
+  // Notify" pattern. Admin-managed, from Settings.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS advance_cc_recipients (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      email TEXT NOT NULL,
+      added_at TEXT
+    );
+  `);
+  await pool.query(`ALTER TABLE advance_cc_recipients ENABLE ROW LEVEL SECURITY;`);
+
   // Seeds the two Settings keys the first time only - safe to run on
   // every startup, never overwrites a value you've already changed from
   // the dashboard.

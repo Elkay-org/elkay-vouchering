@@ -3,7 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const { initSchema } = require('./db');
-const { findUserByEmail, verifyPassword, createUser, updatePassword, requireLogin } = require('./auth');
+const { findUserByEmail, verifyPassword, createUser, updatePassword, requireLogin, requireAdmin } = require('./auth');
 
 const app = express();
 
@@ -54,7 +54,7 @@ app.get('/api/me', (req, res) => {
   res.json({ ok: true, user: req.session.user });
 });
 
-app.post('/api/change-password', requireLogin, async (req, res) => {
+app.post('/api/change-password', requireAdmin, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {

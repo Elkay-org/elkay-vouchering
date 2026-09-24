@@ -45,7 +45,7 @@ function wrapHtml(messagePlainText) {
  * inbox. Omit it for notifications with no logged-in trigger (e.g. a
  * Doer's public action).
  */
-async function sendMail({ to, subject, text, senderEmail }) {
+async function sendMail({ to, subject, text, senderEmail, cc }) {
   if (!RESEND_API_KEY) {
     console.warn('RESEND_API_KEY not configured - skipping email send:', subject);
     return;
@@ -60,6 +60,7 @@ async function sendMail({ to, subject, text, senderEmail }) {
     attachments: [{ filename: 'logo.png', content: SIGNATURE_LOGO_BASE64, content_id: 'logo' }]
   };
   if (senderEmail) body.reply_to = senderEmail;
+  if (cc && cc.length) body.cc = cc;
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -75,7 +76,7 @@ async function sendMail({ to, subject, text, senderEmail }) {
 
 /** ---------- ADVANCE REQUESTS ---------- */
 
-async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId, purpose, amount, baseUrl) {
+async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId, purpose, amount, baseUrl, ccList) {
   if (!accountsEmail) return;
   await sendMail({
     to: accountsEmail,
@@ -84,11 +85,12 @@ async function sendAdvanceRequestNotification(accountsEmail, doerName, requestId
       `Request ID: ${requestId}\nPurpose: ${purpose || 'Not specified'}\n` +
       `Amount Requested: Rs. ${Number(amount).toLocaleString('en-IN')}\n\n` +
       `Please review and decide in the dashboard.` +
-      (baseUrl ? `\n\nOpen the dashboard: ${baseUrl}/` : '')
+      (baseUrl ? `\n\nOpen the dashboard: ${baseUrl}/` : ''),
+    cc: ccList
   });
 }
 
-async function sendAdvanceDecisionToDoer(doerEmail, doerName, requestId, approved, approvedAmount, senderEmail, baseUrl) {
+async function sendAdvanceDecisionToDoer(doerEmail, doerName, requestId, approved, approvedAmount, senderEmail, baseUrl, ccList) {
   if (!doerEmail) return;
   await sendMail({
     to: doerEmail,
@@ -97,7 +99,8 @@ async function sendAdvanceDecisionToDoer(doerEmail, doerName, requestId, approve
       (approved ? `\n\nApproved Amount: Rs. ${Number(approvedAmount).toLocaleString('en-IN')}` : '') +
       `\n\nYou can view this anytime in the Vouchering portal.` +
       (baseUrl ? `\n\nOpen your portal: ${baseUrl}/doer-portal.html` : ''),
-    senderEmail
+    senderEmail,
+    cc: ccList
   });
 }
 

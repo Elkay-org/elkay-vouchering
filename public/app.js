@@ -69,6 +69,10 @@ function showApp() {
   // hidden entirely from Accounts, not just visually de-emphasized.
   const settingsNav = document.querySelector('.side-item[data-page="settings"]');
   if (settingsNav) settingsNav.style.display = (STATE.user.role === 'Admin') ? '' : 'none';
+  // Change Password is Admin-only too - Accounts' own login is managed
+  // entirely through Settings by Admin, not self-service.
+  const changePasswordBtn = document.getElementById('changePasswordBtn');
+  if (changePasswordBtn) changePasswordBtn.style.display = (STATE.user.role === 'Admin') ? '' : 'none';
   loadAll();
 }
 
@@ -116,7 +120,7 @@ async function loadAll(showToast) {
     STATE.doers = doersRes.doers;
     STATE.settings = setRes.settings;
     renderTrips(); renderAdvances(); renderDoers();
-    if (isAdmin) renderSettings();
+    if (isAdmin) { renderSettings(); loadCcRecipients(); }
     document.getElementById('count-trips').textContent = STATE.trips.filter(t => t.TripStatus === 'Submitted').length;
     document.getElementById('count-advances').textContent = STATE.advances.filter(a => a.Status === 'Pending').length;
     document.getElementById('count-doers').textContent = STATE.doers.length;
@@ -495,5 +499,45 @@ async function submitSaveSettings() {
     });
     val_set('set-accounts-password', ''); // never leave a typed password sitting in the form after saving
     toast('Settings saved');
+  } catch (err) { toast(err.message, true); }
+}
+
+/* ---------------- CC LIST FOR ADVANCE EMAILS ---------------- */
+
+async function loadCcRecipients() {
+  try {
+    const res = await api('GET', '/api/advance-cc-recipients');
+    STATE.ccRecipients = res.recipients;
+    renderCcRecipients();
+  } catch (err) { /* quiet - non-critical list */ }
+}
+
+function renderCcRecipients() {
+  const list = STATE.ccRecipients || [];
+  const tbody = document.getElementById('tbl-cc-recipients-body');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="3" class="empty">Nobody added yet.</td></tr>'; return; }
+  tbody.innerHTML = list.map(r => `
+    <tr>
+      <td>${r.Name || '—'}</td><td>${r.Email}</td>
+      <td><button class="small secondary" onclick="deleteCcRecipient(${r.Id})">Delete</button></td>
+    </tr>`).join('');
+}
+
+async function submitAddCcRecipient() {
+  const name = val('cc-name'), email = val('cc-email');
+  if (!email) { toast('Email is required', true); return; }
+  try {
+    await api('POST', '/api/advance-cc-recipients', { name, email });
+    val_set('cc-name', ''); val_set('cc-email', '');
+    toast('Added');
+    loadCcRecipients();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteCcRecipient(id) {
+  if (!confirm('Remove this person from the CC list?')) return;
+  try {
+    await api('DELETE', `/api/advance-cc-recipients/${id}`);
+    loadCcRecipients();
   } catch (err) { toast(err.message, true); }
 }

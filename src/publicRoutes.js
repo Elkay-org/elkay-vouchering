@@ -127,7 +127,9 @@ router.post('/doer/:doerCode/advance-request', async (req, res) => {
 
     const accountsEmail = await getAccountsEmail();
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    sendAdvanceRequestNotification(accountsEmail, doer.doer_name, requestId, purpose, requestedAmount, baseUrl)
+    const ccResult = await pool.query('SELECT email FROM advance_cc_recipients');
+    const ccList = ccResult.rows.map(r => r.email).filter(Boolean);
+    sendAdvanceRequestNotification(accountsEmail, doer.doer_name, requestId, purpose, requestedAmount, baseUrl, ccList)
       .catch(err => console.error('Advance request notification failed:', err.message));
 
     res.json({ ok: true, record: toAdvanceJson(result.rows[0]) });
