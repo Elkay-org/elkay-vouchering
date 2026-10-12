@@ -225,7 +225,7 @@ function renderTripView(trip, vouchers) {
           <div style="font-size:12px;color:var(--text-3);">${v.Description || ''} ${v.DateTime ? '· ' + v.DateTime : ''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
-          ${v.ReceiptPhotoURL ? `<a class="doc-link" href="${v.ReceiptPhotoURL}" target="_blank">Receipt</a>` : `<span class="sub">No receipt</span>`}
+          ${v.ReceiptPhotoURL ? `<a class="doc-link" href="${v.ReceiptPhotoURL}" target="_blank">Receipt</a>` : `<span class="sub">${v.ReceiptAvailable === 'Y' ? 'Has bill' : 'No receipt'}</span>`}
           ${isOngoing ? `<button class="small secondary" onclick="deleteVoucher('${v.VoucherID}')">Delete</button>` : ''}
         </div>
       </div>`).join('');
@@ -248,7 +248,6 @@ function renderTripView(trip, vouchers) {
 
 function toggleNoReceiptFields() {
   const noReceipt = document.getElementById('av-noreceipt').checked;
-  document.getElementById('av-receipt-field').style.display = noReceipt ? 'none' : '';
   document.getElementById('av-noreceipt-field').style.display = noReceipt ? '' : 'none';
 }
 
@@ -258,15 +257,6 @@ function openAddVoucher() {
   toggleNoReceiptFields();
   val_set('av-date', new Date().toISOString().slice(0, 10));
   openModal('modal-add-voucher');
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]); // strip "data:image/jpeg;base64,"
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 async function submitAddVoucher() {
@@ -282,15 +272,7 @@ async function submitAddVoucher() {
     receiptAvailable: !noReceipt, noReceiptReason: val('av-noreceipt-reason')
   };
 
-  if (noReceipt) {
-    if (!payload.noReceiptReason) { toast('A reason is required when no receipt is available', true); return; }
-  } else {
-    const file = document.getElementById('av-receipt-file').files[0];
-    if (!file) { toast('A receipt photo is required (or check "No receipt available")', true); return; }
-    btn.disabled = true; btn.textContent = 'Uploading photo...';
-    payload.receiptPhotoBase64 = await fileToBase64(file);
-    payload.receiptPhotoMimeType = file.type;
-  }
+  if (noReceipt && !payload.noReceiptReason) { toast('A reason is required when no receipt is available', true); return; }
 
   try {
     btn.disabled = true; btn.textContent = 'Saving...';

@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
-const { uploadReceiptToDrive, isDriveConfigured, downloadReceiptFromDrive } = require('./drive');
+const { downloadReceiptFromDrive } = require('./drive');
 const { sendAdvanceRequestNotification, sendTripSubmittedNotification } = require('./mailer');
 const { buildVoucherPdf } = require('./voucherPdf');
 
@@ -49,30 +49,33 @@ async function getAvailableBalance(doerCode) {
     [doerCode]
   );
 
+  // Only trips still being worked on hold their full advance. Once a
+  // Doer SUBMITS a trip, its vouchers are locked, so the unspent part is
+  // released right away - they don't have to wait for Accounts to Pass it.
   const reservedResult = await pool.query(
-    "SELECT COALESCE(SUM(advance_received), 0) as total FROM trips WHERE doer_code = $1 AND trip_status IN ('Ongoing', 'Submitted', 'Rejected')",
+    "SELECT COALESCE(SUM(advance_received), 0) as total FROM trips WHERE doer_code = $1 AND trip_status IN ('Ongoing', 'Rejected')",
     [doerCode]
   );
 
-  const passedResult = await pool.query(`
+  const settledResult = await pool.query(`
     SELECT t.advance_received, t.advance_returned, COALESCE(SUM(v.amount), 0) as voucher_total
     FROM trips t LEFT JOIN vouchers v ON v.trip_code = t.trip_code
-    WHERE t.doer_code = $1 AND t.trip_status = 'Passed'
+    WHERE t.doer_code = $1 AND t.trip_status IN ('Submitted', 'Passed')
     GROUP BY t.trip_code, t.advance_received, t.advance_returned
   `, [doerCode]);
-  const spentOnPassedTrips = passedResult.rows.reduce((sum, r) => {
+  const spentOnSettledTrips = settledResult.rows.reduce((sum, r) => {
     const advance = Number(r.advance_received);
     const vouchers = Number(r.voucher_total);
-    if (vouchers >= advance) return sum + advance; // fully spent or overspent either way - nothing left over
-    // There's a remaining balance. If Accounts confirmed the Doer
-    // physically returned it, the FULL advance counts as accounted
-    // for - it doesn't stay usable. If not confirmed (or not yet
-    // asked), only the spent portion is removed, so the rest keeps
-    // rolling forward as available, same as before.
+    if (vouchers >= advance) return sum + advance; // fully spent or overspent - nothing left over
+    // There's a remaining balance. If Accounts confirmed (at Pass) that the
+    // Doer physically returned it, the FULL advance is accounted for and it
+    // doesn't stay usable. Otherwise (including every Submitted trip, which
+    // hasn't been asked yet) only the spent portion is removed, so the rest
+    // shows as available.
     return sum + (r.advance_returned === 'Y' ? advance : vouchers);
   }, 0);
 
-  return Number(approvedResult.rows[0].total) - Number(reservedResult.rows[0].total) - spentOnPassedTrips;
+  return Number(approvedResult.rows[0].total) - Number(reservedResult.rows[0].total) - spentOnSettledTrips;
 }
 
 async function getAccountsEmail() {
@@ -267,7 +270,7 @@ router.post('/doer/:doerCode/trip/:tripCode/vouchers', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'This trip is locked and can no longer be edited.' });
     }
 
-    const { dateTime, expenseType, description, amount, receiptAvailable, receiptPhotoBase64, receiptPhotoMimeType, noReceiptReason } = req.body;
+    const { dateTime, expenseType, description, amount, receiptAvailable, noReceiptReason } = req.body;
     if (!amount || Number(amount) <= 0) {
       return res.status(400).json({ ok: false, error: 'A valid amount is required.' });
     }
@@ -276,21 +279,10 @@ router.post('/doer/:doerCode/trip/:tripCode/vouchers', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'A reason is required when no receipt is available.' });
     }
 
-    let receiptPhotoUrl = null;
-    if (hasReceipt) {
-      if (!receiptPhotoBase64) {
-        return res.status(400).json({ ok: false, error: 'A receipt photo is required (or mark "No receipt" with a reason).' });
-      }
-      if (!isDriveConfigured()) {
-        return res.status(500).json({ ok: false, error: 'Receipt storage is not set up correctly. Contact Accounts before continuing - your photo was not saved.' });
-      }
-      const buffer = Buffer.from(receiptPhotoBase64, 'base64');
-      const filename = `receipt_${Date.now()}.jpg`;
-      receiptPhotoUrl = await uploadReceiptToDrive(buffer, filename, receiptPhotoMimeType || 'image/jpeg', req.params.tripCode);
-      if (!receiptPhotoUrl) {
-        return res.status(500).json({ ok: false, error: 'Could not upload the receipt photo. Please try again.' });
-      }
-    }
+    // Receipt photos are no longer uploaded - the Doer just says whether
+    // they have a physical bill (handed to Accounts with the printed
+    // voucher) or gives a reason if not.
+    const receiptPhotoUrl = null;
 
     const voucherId = await nextSequentialCode(pool, 'vouchers', 'voucher_id', 'V-');
     const now = formatDate(new Date());

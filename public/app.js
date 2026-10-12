@@ -255,7 +255,7 @@ async function openTripDetail(tripCode) {
             <tr>
               <td class="mono">${v.VoucherID}</td><td>${v.ExpenseType}</td><td>${v.Description || '—'}</td>
               <td>Rs. ${v.Amount.toLocaleString('en-IN')}</td>
-              <td>${v.ReceiptPhotoURL ? `<a class="doc-link" href="${v.ReceiptPhotoURL}" target="_blank">View</a>` : (v.NoReceiptReason ? 'None: ' + v.NoReceiptReason : '—')}</td>
+              <td>${v.ReceiptPhotoURL ? `<a class="doc-link" href="${v.ReceiptPhotoURL}" target="_blank">View</a>` : (v.ReceiptAvailable === 'Y' ? 'Has bill' : (v.NoReceiptReason ? 'None: ' + v.NoReceiptReason : '—'))}</td>
             </tr>`).join('')}</tbody>
         </table>
       </div>
