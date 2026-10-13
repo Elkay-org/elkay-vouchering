@@ -168,3 +168,12 @@ tbody tr:hover td{background:var(--bg-2);}
 .candidate-group-body{border-top:1px solid var(--line-soft);}
 .candidate-group.collapsed .candidate-group-body{display:none;}
 .candidate-group-body table{width:100%;}
+
+/* ---------- Search & filter bars ---------- */
+.filterbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px;}
+.filterbar .fb-field{display:flex;flex-direction:column;gap:4px;min-width:140px;}
+.filterbar .fb-field.grow{flex:1;min-width:220px;}
+.filterbar label{font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-3);}
+.filterbar input,.filterbar select{padding:7px 10px;font-size:13px;}
+.filter-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12.5px;color:var(--text-3);margin:0 2px 8px;}
+.filter-summary b{color:var(--text-1);}

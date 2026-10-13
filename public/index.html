@@ -92,6 +92,14 @@
           <div><h2>Trips</h2><p>All trips across every Doer. Click a row to review, pass, or reject.</p></div>
         </div>
         <div class="metrics" id="metrics-trips"></div>
+        <div class="filterbar">
+          <div class="fb-field grow"><label>Search</label><input id="ft-search" placeholder="Trip code, Doer, location or purpose" oninput="renderTrips()"></div>
+          <div class="fb-field"><label>Doer</label><select id="ft-doer" onchange="renderTrips()"></select></div>
+          <div class="fb-field"><label>Start Date From</label><input type="date" id="ft-from" onchange="renderTrips()"></div>
+          <div class="fb-field"><label>Start Date To</label><input type="date" id="ft-to" onchange="renderTrips()"></div>
+          <button class="secondary small" onclick="clearTripFilters()">Clear Filters</button>
+        </div>
+        <div class="filter-summary" id="ft-summary"></div>
         <div class="tablewrap">
           <table>
             <thead><tr><th>Trip Code</th><th>Doer</th><th>Location</th><th>Start Date</th><th>End Date</th><th>Advance</th><th>Status</th></tr></thead>
@@ -105,9 +113,18 @@
         <div class="page-head">
           <div><h2>Advance Requests</h2><p>Doers' cash advance requests, awaiting your decision.</p></div>
         </div>
+        <div class="filterbar">
+          <div class="fb-field grow"><label>Search</label><input id="fa-search" placeholder="Request ID, Doer or purpose" oninput="renderAdvances()"></div>
+          <div class="fb-field"><label>Status</label><select id="fa-status" onchange="renderAdvances()">
+            <option value="">All</option><option value="Pending">Pending</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option>
+          </select></div>
+          <div class="fb-field"><label>Doer</label><select id="fa-doer" onchange="renderAdvances()"></select></div>
+          <button class="secondary small" onclick="clearAdvanceFilters()">Clear Filters</button>
+        </div>
+        <div class="filter-summary" id="fa-summary"></div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Request ID</th><th>Doer</th><th>Purpose</th><th>Requested</th><th>Approved</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Request ID</th><th>Date</th><th>Doer</th><th>Purpose</th><th>Requested</th><th>Approved</th><th>Status</th><th></th></tr></thead>
             <tbody id="tbl-advances-body"></tbody>
           </table>
         </div>
@@ -119,6 +136,14 @@
           <div><h2>Doers</h2><p>Org members who can travel and submit vouchers.</p></div>
           <button onclick="openModal('modal-new-doer')">+ Add Doer</button>
         </div>
+        <div class="filterbar">
+          <div class="fb-field grow"><label>Search</label><input id="fd-search" placeholder="Name, Doer code or email" oninput="renderDoers()"></div>
+          <div class="fb-field"><label>Show</label><select id="fd-active" onchange="renderDoers()">
+            <option value="">All</option><option value="Y">Active only</option><option value="N">Inactive only</option>
+          </select></div>
+          <button class="secondary small" onclick="clearDoerFilters()">Clear Filters</button>
+        </div>
+        <div class="filter-summary" id="fd-summary"></div>
         <div class="tablewrap">
           <table>
             <thead><tr><th>Doer Code</th><th>Name</th><th>Email</th><th>Active</th><th></th></tr></thead>
@@ -240,7 +265,10 @@
 
   <div class="modal-bg" id="modal-trip-detail">
     <div class="modal" style="width:640px;">
-      <h3 id="td-title">Trip Detail</h3>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <h3 id="td-title">Trip Detail</h3>
+        <button type="button" class="secondary small" onclick="closeModal('modal-trip-detail')" title="Close" aria-label="Close" style="padding:2px 10px;font-size:18px;line-height:1.2;">&times;</button>
+      </div>
       <div id="td-body"></div>
       <div class="modal-actions" id="td-actions"></div>
     </div>

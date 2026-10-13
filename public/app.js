@@ -188,24 +188,84 @@ function tripStatusBadgeClass(status) {
 
 /* ---------------- TRIPS ---------------- */
 
+/* ---------- shared filter helpers ---------- */
+
+const rs = (n) => 'Rs. ' + Number(n || 0).toLocaleString('en-IN');
+const fval = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+
+// "DD-MM-YYYY" (how dates are stored) -> "YYYY-MM-DD" (how date inputs
+// report them), so the two compare correctly as plain strings.
+function ddmmyyyyToIso(d) {
+  if (!d) return '';
+  const p = String(d).split('-');
+  return p.length === 3 && p[2].length === 4 ? `${p[2]}-${p[1]}-${p[0]}` : '';
+}
+
+// Fills a Doer dropdown from the Doers list, keeping whatever was already
+// selected (so a Refresh doesn't wipe the filter the person had set).
+function fillDoerFilter(id) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Doers</option>' +
+    [...STATE.doers].sort((x, y) => x.DoerName.localeCompare(y.DoerName))
+      .map(d => `<option value="${d.DoerCode}">${d.DoerName}</option>`).join('');
+  sel.value = current;
+}
+
+function matchesSearch(q, fields) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  return fields.some(f => String(f || '').toLowerCase().includes(needle));
+}
+
 function renderTrips() {
+  fillDoerFilter('ft-doer');
+  const q = fval('ft-search'), doer = fval('ft-doer'), from = fval('ft-from'), to = fval('ft-to');
+
+  // Everything except status first, so the scorecards show counts for the
+  // CURRENT search - e.g. "how many of Ravi's trips are Submitted".
+  const base = STATE.trips.filter(t => {
+    if (doer && t.DoerCode !== doer) return false;
+    if (!matchesSearch(q, [t.TripCode, t.DoerName, t.DoerCode, t.LocationVisited, t.PurposeOfVisit])) return false;
+    const start = ddmmyyyyToIso(t.StartDate);
+    if (from && (!start || start < from)) return false;
+    if (to && (!start || start > to)) return false;
+    return true;
+  });
+
   const counts = { Ongoing: 0, Submitted: 0, Passed: 0, Rejected: 0 };
-  STATE.trips.forEach(t => { if (counts[t.TripStatus] !== undefined) counts[t.TripStatus]++; });
+  base.forEach(t => { if (counts[t.TripStatus] !== undefined) counts[t.TripStatus]++; });
   document.getElementById('metrics-trips').innerHTML = Object.entries(counts).map(([status, n]) => `
     <div class="metric ${STATE.tripStatusFilter === status ? 'active' : ''}" onclick="filterTripsByStatus('${status}')">
       <div class="mvalue">${n}</div><div class="mlabel">${status}</div>
     </div>
   `).join('');
 
-  const filtered = STATE.tripStatusFilter ? STATE.trips.filter(t => t.TripStatus === STATE.tripStatusFilter) : STATE.trips;
+  const filtered = STATE.tripStatusFilter ? base.filter(t => t.TripStatus === STATE.tripStatusFilter) : base;
+  const anyFilter = q || doer || from || to || STATE.tripStatusFilter;
+  const totalAdvance = filtered.reduce((sum, t) => sum + Number(t.AdvanceReceived || 0), 0);
+  document.getElementById('ft-summary').innerHTML =
+    `<span>Showing <b>${filtered.length}</b> of ${STATE.trips.length} trips${STATE.tripStatusFilter ? ` &middot; status: <b>${STATE.tripStatusFilter}</b>` : ''}</span>` +
+    `<span>Total advance in this list: <b>${rs(totalAdvance)}</b></span>`;
+
   const tbody = document.getElementById('tbl-trips-body');
-  if (!filtered.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">${STATE.tripStatusFilter ? 'No ' + STATE.tripStatusFilter.toLowerCase() + ' trips.' : 'No trips yet.'}</td></tr>`; return; }
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">${anyFilter ? 'No trips match these filters.' : 'No trips yet.'}</td></tr>`;
+    return;
+  }
   tbody.innerHTML = filtered.map(t => `
     <tr onclick="openTripDetail('${t.TripCode}')" style="cursor:pointer;">
       <td class="mono">${t.TripCode}</td><td>${t.DoerName || t.DoerCode}</td><td>${t.LocationVisited || '—'}</td>
-      <td>${t.StartDate || '—'}</td><td>${t.EndDate || '—'}</td><td>Rs. ${t.AdvanceReceived.toLocaleString('en-IN')}</td>
+      <td>${t.StartDate || '—'}</td><td>${t.EndDate || '—'}</td><td>${rs(t.AdvanceReceived)}</td>
       <td><span class="badge ${tripStatusBadgeClass(t.TripStatus)}">${t.TripStatus}</span></td>
     </tr>`).join('');
+}
+
+function clearTripFilters() {
+  ['ft-search', 'ft-doer', 'ft-from', 'ft-to'].forEach(id => { document.getElementById(id).value = ''; });
+  STATE.tripStatusFilter = null;
+  renderTrips();
 }
 
 function filterTripsByStatus(status) {
@@ -263,14 +323,17 @@ async function openTripDetail(tripCode) {
     const actions = document.getElementById('td-actions');
     const deleteBtn = `<button class="secondary" style="border-color:var(--red);color:var(--red-text);margin-right:auto;" onclick="submitDeleteTrip('${t.TripCode}')">Delete</button>`;
     const pdfBtn = `<button class="secondary" onclick="window.open('/api/trips/${t.TripCode}/pdf', '_blank')">Download PDF</button>`;
+    // Close is offered in EVERY state, so Accounts can always back out
+    // without having to Pass, Reject, or Reopen first.
+    const closeBtn = `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
     if (t.TripStatus === 'Submitted') {
-      actions.innerHTML = deleteBtn + pdfBtn + `
+      actions.innerHTML = deleteBtn + pdfBtn + closeBtn + `
         <button class="secondary" style="border-color:var(--red);color:var(--red-text);" onclick="closeModal('modal-trip-detail');openRejectTrip('${t.TripCode}')">Reject</button>
         <button onclick="submitPassTrip('${t.TripCode}')">Pass</button>`;
     } else if (t.TripStatus === 'Rejected') {
-      actions.innerHTML = deleteBtn + pdfBtn + `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
+      actions.innerHTML = deleteBtn + pdfBtn + closeBtn + `<button onclick="submitReopenTrip('${t.TripCode}')">Reopen for Correction</button>`;
     } else {
-      actions.innerHTML = deleteBtn + pdfBtn + `<button class="secondary" onclick="closeModal('modal-trip-detail')">Close</button>`;
+      actions.innerHTML = deleteBtn + pdfBtn + closeBtn;
     }
     openModal('modal-trip-detail');
   } catch (err) { toast(err.message, true); }
@@ -342,19 +405,45 @@ async function submitDeleteTrip(tripCode) {
 /* ---------------- ADVANCE REQUESTS ---------------- */
 
 function renderAdvances() {
+  fillDoerFilter('fa-doer');
+  const q = fval('fa-search'), status = fval('fa-status'), doer = fval('fa-doer');
+  const filtered = STATE.advances.filter(a => {
+    if (status && a.Status !== status) return false;
+    if (doer && a.DoerCode !== doer) return false;
+    return matchesSearch(q, [a.RequestID, a.DoerName, a.DoerCode, a.Purpose]);
+  });
+  // Pending requests always sit at the top, so nothing awaiting a decision
+  // gets buried under older approved/rejected ones.
+  filtered.sort((x, y) => (x.Status === 'Pending' ? 0 : 1) - (y.Status === 'Pending' ? 0 : 1));
+
+  const totalReq = filtered.reduce((s2, a) => s2 + Number(a.RequestedAmount || 0), 0);
+  const totalAppr = filtered.reduce((s2, a) => s2 + Number(a.ApprovedAmount || 0), 0);
+  const pendingCount = STATE.advances.filter(a => a.Status === 'Pending').length;
+  document.getElementById('fa-summary').innerHTML =
+    `<span>Showing <b>${filtered.length}</b> of ${STATE.advances.length} requests${pendingCount ? ` &middot; <b>${pendingCount}</b> pending overall` : ''}</span>` +
+    `<span>Requested: <b>${rs(totalReq)}</b> &middot; Approved: <b>${rs(totalAppr)}</b></span>`;
+
   const tbody = document.getElementById('tbl-advances-body');
-  if (!STATE.advances.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No advance requests yet.</td></tr>'; return; }
-  tbody.innerHTML = STATE.advances.map(a => `
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">${STATE.advances.length ? 'No requests match these filters.' : 'No advance requests yet.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(a => `
     <tr>
-      <td class="mono">${a.RequestID}</td><td>${a.DoerName || a.DoerCode}</td><td>${a.Purpose || '—'}</td>
-      <td>Rs. ${a.RequestedAmount.toLocaleString('en-IN')}</td>
-      <td>${a.ApprovedAmount != null ? 'Rs. ' + a.ApprovedAmount.toLocaleString('en-IN') : '—'}</td>
+      <td class="mono">${a.RequestID}</td><td>${a.CreatedAt || '—'}</td><td>${a.DoerName || a.DoerCode}</td><td>${a.Purpose || '—'}</td>
+      <td>${rs(a.RequestedAmount)}</td>
+      <td>${a.ApprovedAmount != null ? rs(a.ApprovedAmount) : '—'}</td>
       <td><span class="badge ${a.Status === 'Approved' ? 'pass' : a.Status === 'Rejected' ? 'rejected' : 'pending'}">${a.Status}</span></td>
       <td>
         ${a.Status === 'Pending' ? `<button class="small" onclick="openDecideAdvance('${a.RequestID}', ${a.RequestedAmount})">Decide</button>` : ''}
         <button class="small secondary" style="border-color:var(--red);color:var(--red-text);" onclick="submitDeleteAdvance('${a.RequestID}')">Delete</button>
       </td>
     </tr>`).join('');
+}
+
+function clearAdvanceFilters() {
+  ['fa-search', 'fa-status', 'fa-doer'].forEach(id => { document.getElementById(id).value = ''; });
+  renderAdvances();
 }
 
 async function submitDeleteAdvance(requestId) {
@@ -387,14 +476,31 @@ async function submitDecideAdvance(approved) {
 /* ---------------- DOERS ---------------- */
 
 function renderDoers() {
+  const q = fval('fd-search'), active = fval('fd-active');
+  const filtered = STATE.doers.filter(d => {
+    if (active && d.Active !== active) return false;
+    return matchesSearch(q, [d.DoerName, d.DoerCode, d.Email]);
+  });
+  const activeCount = STATE.doers.filter(d => d.Active === 'Y').length;
+  document.getElementById('fd-summary').innerHTML =
+    `<span>Showing <b>${filtered.length}</b> of ${STATE.doers.length} Doers &middot; <b>${activeCount}</b> active</span><span></span>`;
+
   const tbody = document.getElementById('tbl-doers-body');
-  if (!STATE.doers.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">No Doers added yet.</td></tr>'; return; }
-  tbody.innerHTML = STATE.doers.map(d => `
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">${STATE.doers.length ? 'No Doers match these filters.' : 'No Doers added yet.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(d => `
     <tr>
       <td class="mono">${d.DoerCode}</td><td>${d.DoerName}</td><td>${d.Email || '—'}</td>
       <td><span class="badge ${d.Active === 'Y' ? 'active' : 'inactive'}">${d.Active === 'Y' ? 'Active' : 'Inactive'}</span></td>
       <td><button class="small secondary" onclick='openEditDoer(${JSON.stringify(d)})'>Edit</button></td>
     </tr>`).join('');
+}
+
+function clearDoerFilters() {
+  ['fd-search', 'fd-active'].forEach(id => { document.getElementById(id).value = ''; });
+  renderDoers();
 }
 
 async function submitNewDoer() {
