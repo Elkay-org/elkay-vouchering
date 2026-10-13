@@ -385,4 +385,4 @@ function toVoucherJson(v) {
   };
 }
 
-module.exports = { router };
+module.exports = { router, getAvailableBalance };

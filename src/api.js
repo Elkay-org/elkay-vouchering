@@ -6,6 +6,7 @@ const { sendAdvanceDecisionToDoer, sendTripDecisionToDoer } = require('./mailer'
 const { uploadVoucherPdfToDrive, uploadReportToDrive } = require('./drive');
 const { buildTripPdfBuffer } = require('./pdfHelper');
 const { buildWeeklyReportBuffer } = require('./reportHelper');
+const { getAvailableBalance } = require('./publicRoutes');
 const router = express.Router();
 
 router.use(requireLogin); // everything below requires Admin/Accounts login
@@ -109,11 +110,44 @@ function toAdvanceJson(r) {
 
 router.get('/trips', safe(async (req, res) => {
   const result = await pool.query(`
-    SELECT t.*, d.doer_name FROM trips t
+    SELECT t.*, d.doer_name, COALESCE(v.total, 0) AS voucher_total
+    FROM trips t
     JOIN doers d ON d.doer_code = t.doer_code
+    LEFT JOIN (SELECT trip_code, SUM(amount) AS total FROM vouchers GROUP BY trip_code) v ON v.trip_code = t.trip_code
     ORDER BY t.id DESC
   `);
-  res.json({ ok: true, trips: result.rows.map(r => ({ ...toTripJson(r), DoerName: r.doer_name })) });
+  res.json({ ok: true, trips: result.rows.map(r => ({ ...toTripJson(r), DoerName: r.doer_name, VoucherTotal: Number(r.voucher_total) })) });
+}));
+
+// Per-Doer money picture for the Dashboard. Uses the SAME available-balance
+// calculation the Doer sees in their own portal, so the two never disagree.
+router.get('/overview/doer-balances', safe(async (req, res) => {
+  const doers = (await pool.query("SELECT doer_code, doer_name, active FROM doers ORDER BY doer_name")).rows;
+  const tripRows = (await pool.query(`
+    SELECT t.doer_code, t.trip_status, t.advance_received, t.advance_returned, COALESCE(SUM(v.amount), 0) AS voucher_total
+    FROM trips t LEFT JOIN vouchers v ON v.trip_code = t.trip_code
+    GROUP BY t.trip_code, t.doer_code, t.trip_status, t.advance_received, t.advance_returned
+  `)).rows;
+
+  const balances = [];
+  for (const d of doers) {
+    const mine = tripRows.filter(t => t.doer_code === d.doer_code);
+    const available = await getAvailableBalance(d.doer_code);
+    // Advance tied up on trips still being worked on
+    const onActiveTrips = mine.filter(t => t.trip_status === 'Ongoing' || t.trip_status === 'Rejected')
+      .reduce((s, t) => s + Number(t.advance_received || 0), 0);
+    // Unspent advance on PASSED trips that Accounts marked "Not returned" -
+    // i.e. money Accounts still needs to collect back.
+    const toCollect = mine.filter(t => t.trip_status === 'Passed' && t.advance_returned === 'N')
+      .reduce((s, t) => s + Math.max(0, Number(t.advance_received || 0) - Number(t.voucher_total)), 0);
+    const openTrips = mine.filter(t => t.trip_status !== 'Passed').length;
+    balances.push({
+      DoerCode: d.doer_code, DoerName: d.doer_name, Active: d.active,
+      Available: available, OnActiveTrips: onActiveTrips, WithDoer: available + onActiveTrips,
+      ToCollect: toCollect, OpenTrips: openTrips
+    });
+  }
+  res.json({ ok: true, balances });
 }));
 
 router.get('/trips/:tripCode', safe(async (req, res) => {

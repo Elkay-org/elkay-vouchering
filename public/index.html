@@ -34,7 +34,11 @@
         </button>
       </div>
 
-      <div class="side-item active" data-page="trips">
+      <div class="side-item active" data-page="dashboard">
+        <span class="side-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1"/><rect x="10" y="10" width="5.5" height="5.5" rx="1"/></svg></span>
+        <span class="side-label">Dashboard</span>
+      </div>
+      <div class="side-item" data-page="trips">
         <span class="side-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h5.5L14 6v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"/><path d="M10.5 2.5V6H14"/><path d="M6.5 9.5h5M6.5 12h5"/></svg></span>
         <span class="side-label">Trips</span>
         <span class="side-count" id="count-trips">0</span>
@@ -72,7 +76,7 @@
 
     <main class="main">
       <div class="topbar">
-        <h2 id="page-title">Trips</h2>
+        <h2 id="page-title">Dashboard</h2>
         <div class="actions">
           <span class="sub" id="lastSynced"></span>
           <button class="secondary small" id="refreshTopBtn">Refresh</button>
@@ -87,7 +91,33 @@
       </div>
 
       <!-- ===== TRIPS PAGE ===== -->
-      <div class="page active" id="page-trips">
+      <div class="page active" id="page-dashboard">
+        <div class="page-head">
+          <div><h2 id="dash-greeting">Dashboard</h2><p>What needs your attention, and where the company's advance money is right now.</p></div>
+        </div>
+        <div class="kpis" id="dash-kpis"></div>
+        <div class="dash-grid">
+          <div class="dash-card">
+            <div class="dash-card-head"><h3>Needs your attention</h3><span class="sub" id="dash-attn-count"></span></div>
+            <div id="dash-attention"></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-card-head"><h3>This month</h3><span class="sub" id="dash-month-label"></span></div>
+            <div id="dash-month"></div>
+          </div>
+        </div>
+        <div class="dash-card" style="margin-top:16px;">
+          <div class="dash-card-head"><h3>Doer balances</h3><span class="sub">Click a Doer to see their trips</span></div>
+          <div class="tablewrap" style="border:none;max-height:none;">
+            <table>
+              <thead><tr><th>Doer</th><th>Available to use</th><th>On open trips</th><th>Total with Doer</th><th>Kept, not returned</th><th>Open trips</th></tr></thead>
+              <tbody id="tbl-dash-balances"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-trips">
         <div class="page-head">
           <div><h2>Trips</h2><p>All trips across every Doer. Click a row to review, pass, or reject.</p></div>
         </div>
@@ -102,7 +132,7 @@
         <div class="filter-summary" id="ft-summary"></div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Trip Code</th><th>Doer</th><th>Location</th><th>Start Date</th><th>End Date</th><th>Advance</th><th>Status</th></tr></thead>
+            <thead><tr><th>Trip Code</th><th>Doer</th><th>Location</th><th>Start Date</th><th>End Date</th><th>Advance</th><th>Spent</th><th>Settlement</th><th>Status</th></tr></thead>
             <tbody id="tbl-trips-body"></tbody>
           </table>
         </div>

@@ -121,6 +121,8 @@ async function loadAll(showToast) {
     STATE.settings = setRes.settings;
     renderTrips(); renderAdvances(); renderDoers();
     if (isAdmin) { renderSettings(); loadCcRecipients(); }
+    loadDoerBalances(); // the Dashboard's money picture - loads alongside, renders when ready
+    renderDashboard();
     document.getElementById('count-trips').textContent = STATE.trips.filter(t => t.TripStatus === 'Submitted').length;
     document.getElementById('count-advances').textContent = STATE.advances.filter(a => a.Status === 'Pending').length;
     document.getElementById('count-doers').textContent = STATE.doers.length;
@@ -168,12 +170,137 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 15000);
 });
 
-const PAGE_TITLES = { trips: 'Trips', advances: 'Advance Requests', doers: 'Doers', reports: 'Reports', settings: 'Settings' };
+const PAGE_TITLES = { dashboard: 'Dashboard', trips: 'Trips', advances: 'Advance Requests', doers: 'Doers', reports: 'Reports', settings: 'Settings' };
 function showPage(page) {
   document.querySelectorAll('.side-item[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page));
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('page-title').textContent = PAGE_TITLES[page];
+}
+
+
+/* ---------------- DASHBOARD ---------------- */
+
+// Short, colour-coded settlement for a table cell:
+// red = Doer owes the company, amber = company owes the Doer.
+function settlementCell(t) {
+  // A trip still being worked on has no settlement yet - its expenses aren't final
+  if (t.TripStatus === 'Ongoing' || t.TripStatus === 'Rejected') return '<span class="sub">In progress</span>';
+  const diff = Number(t.VoucherTotal || 0) - Number(t.AdvanceReceived || 0);
+  if (diff === 0) return '<span class="sub">Settled</span>';
+  if (diff < 0) {
+    if (t.TripStatus === 'Passed' && t.AdvanceReturned === 'Y') return `<span class="sub">${rs(-diff)} returned</span>`;
+    if (t.TripStatus === 'Passed') return `<span class="sub">${rs(-diff)} kept for next trip</span>`;
+    return `<span class="amt-red">Doer owes ${rs(-diff)}</span>`; // Submitted - not yet decided
+  }
+  return `<span class="amt-amber">Pay Doer ${rs(diff)}</span>`;
+}
+
+// Days between a DD-MM-YYYY date and today
+function daysSince(ddmmyyyy) {
+  const iso = ddmmyyyyToIso(ddmmyyyy);
+  if (!iso) return null;
+  return Math.max(0, Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(iso + 'T00:00:00')) / 86400000));
+}
+
+async function loadDoerBalances() {
+  try {
+    const res = await api('GET', '/api/overview/doer-balances');
+    STATE.doerBalances = res.balances;
+  } catch (err) { STATE.doerBalances = []; }
+  renderDashboard();
+}
+
+function goToTrips(filter) {
+  clearTripFilters();
+  if (filter.status) STATE.tripStatusFilter = filter.status;
+  if (filter.doer) document.getElementById('ft-doer').value = filter.doer;
+  renderTrips();
+  showPage('trips');
+}
+
+function goToAdvances(status) {
+  clearAdvanceFilters();
+  document.getElementById('fa-status').value = status || '';
+  renderAdvances();
+  showPage('advances');
+}
+
+function renderDashboard() {
+  const trips = STATE.trips || [], advances = STATE.advances || [], balances = STATE.doerBalances || [];
+  const name = STATE.user ? (STATE.user.name || '').split(' ')[0] : '';
+  document.getElementById('dash-greeting').textContent = name ? `Hello, ${name}` : 'Dashboard';
+
+  const submitted = trips.filter(t => t.TripStatus === 'Submitted');
+  const pendingAdv = advances.filter(a => a.Status === 'Pending');
+  const withDoers = balances.reduce((s2, b) => s2 + Math.max(0, b.WithDoer), 0);
+  const toCollect = balances.reduce((s2, b) => s2 + b.ToCollect, 0);
+  const claimed = submitted.reduce((s2, t) => s2 + Number(t.VoucherTotal || 0), 0);
+  const requested = pendingAdv.reduce((s2, a) => s2 + Number(a.RequestedAmount || 0), 0);
+
+  const kpi = (color, label, value, sub, onclick) =>
+    `<div class="kpi" style="--kpi-color:${color}" onclick="${onclick}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+  document.getElementById('dash-kpis').innerHTML =
+    kpi('var(--amber-text)', 'Trips to review', submitted.length, submitted.length ? `${rs(claimed)} claimed` : 'All caught up', "goToTrips({status:'Submitted'})") +
+    kpi('var(--brand)', 'Advance requests', pendingAdv.length, pendingAdv.length ? `${rs(requested)} requested` : 'None pending', "goToAdvances('Pending')") +
+    kpi('#4a90d9', 'Cash with Doers', rs(withDoers), 'Unused advance + open trips', "document.getElementById('tbl-dash-balances').scrollIntoView({behavior:'smooth'})") +
+    kpi('var(--text-3)', 'Kept, not returned', rs(toCollect), toCollect ? 'Already part of cash with Doers' : 'None', "document.getElementById('tbl-dash-balances').scrollIntoView({behavior:'smooth'})");
+
+  // ---- Needs your attention: oldest first, so nothing waits too long ----
+  const items = [];
+  submitted.forEach(t => {
+    const waited = daysSince(t.EndDate || t.StartDate);
+    items.push({ sortKey: waited == null ? 0 : waited, color: 'var(--amber-text)',
+      main: `Review ${t.TripCode} — ${t.DoerName}`,
+      meta: `${t.LocationVisited || ''}${waited != null ? ` · waiting ${waited} day${waited === 1 ? '' : 's'}` : ''}`,
+      amt: rs(t.VoucherTotal), click: `openTripDetail('${t.TripCode}')` });
+  });
+  pendingAdv.forEach(a => {
+    const waited = daysSince(a.CreatedAt);
+    items.push({ sortKey: waited == null ? 0 : waited, color: 'var(--brand)',
+      main: `Advance ${a.RequestID} — ${a.DoerName || a.DoerCode}`,
+      meta: `${a.Purpose || 'No purpose given'}${waited != null ? ` · requested ${waited === 0 ? 'today' : waited + ' day' + (waited === 1 ? '' : 's') + ' ago'}` : ''}`,
+      amt: rs(a.RequestedAmount), click: `openDecideAdvance('${a.RequestID}', ${a.RequestedAmount})` });
+  });
+  items.sort((x, y) => y.sortKey - x.sortKey);
+  document.getElementById('dash-attn-count').textContent = items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : '';
+  document.getElementById('dash-attention').innerHTML = items.length
+    ? items.slice(0, 8).map(i => `
+      <div class="attn-item" style="--attn-color:${i.color}" onclick="${i.click}">
+        <div><div class="attn-main">${i.main}</div><div class="attn-meta">${i.meta}</div></div>
+        <div class="attn-amt">${i.amt}</div>
+      </div>`).join('') + (items.length > 8 ? `<div class="sub" style="padding:6px 4px;">+ ${items.length - 8} more</div>` : '')
+    : '<div class="attn-empty">Nothing waiting on you right now.</div>';
+
+  // ---- This month (by Passed Date) ----
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0'), yyyy = String(now.getFullYear());
+  const inMonth = (d) => { const iso = ddmmyyyyToIso(d); return iso && iso.slice(0, 7) === `${yyyy}-${mm}`; };
+  const passedThisMonth = trips.filter(t => t.TripStatus === 'Passed' && inMonth(t.PassedDate));
+  const startedThisMonth = trips.filter(t => inMonth(t.StartDate));
+  const approvedThisMonth = advances.filter(a => a.Status === 'Approved' && inMonth(a.DecidedAt || a.CreatedAt));
+  document.getElementById('dash-month-label').textContent = now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  const row = (label, value) => `<div class="month-row"><span>${label}</span><b>${value}</b></div>`;
+  document.getElementById('dash-month').innerHTML =
+    row('Trips started', startedThisMonth.length) +
+    row('Trips passed', passedThisMonth.length) +
+    row('Expenses passed', rs(passedThisMonth.reduce((s2, t) => s2 + Number(t.VoucherTotal || 0), 0))) +
+    row('Advances approved', rs(approvedThisMonth.reduce((s2, a) => s2 + Number(a.ApprovedAmount || 0), 0)));
+
+  // ---- Doer balances ----
+  const tbody = document.getElementById('tbl-dash-balances');
+  const shown = balances.filter(b => b.Active === 'Y' || b.WithDoer !== 0 || b.ToCollect > 0 || b.OpenTrips > 0)
+    .sort((x, y) => (y.WithDoer + y.ToCollect) - (x.WithDoer + x.ToCollect));
+  tbody.innerHTML = shown.length ? shown.map(b => `
+    <tr style="cursor:pointer;" onclick="goToTrips({doer:'${b.DoerCode}'})">
+      <td>${b.DoerName}${b.Active === 'Y' ? '' : ' <span class="sub">(inactive)</span>'}</td>
+      <td class="${b.Available < 0 ? 'amt-red' : ''}">${rs(b.Available)}</td>
+      <td>${rs(b.OnActiveTrips)}</td>
+      <td><b>${rs(b.WithDoer)}</b></td>
+      <td>${b.ToCollect > 0 ? rs(b.ToCollect) : '—'}</td>
+      <td>${b.OpenTrips}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No Doers yet.</td></tr>';
 }
 
 /* ---------------- BADGES ---------------- */
@@ -245,19 +372,21 @@ function renderTrips() {
   const filtered = STATE.tripStatusFilter ? base.filter(t => t.TripStatus === STATE.tripStatusFilter) : base;
   const anyFilter = q || doer || from || to || STATE.tripStatusFilter;
   const totalAdvance = filtered.reduce((sum, t) => sum + Number(t.AdvanceReceived || 0), 0);
+  const totalSpent = filtered.reduce((sum, t) => sum + Number(t.VoucherTotal || 0), 0);
   document.getElementById('ft-summary').innerHTML =
     `<span>Showing <b>${filtered.length}</b> of ${STATE.trips.length} trips${STATE.tripStatusFilter ? ` &middot; status: <b>${STATE.tripStatusFilter}</b>` : ''}</span>` +
-    `<span>Total advance in this list: <b>${rs(totalAdvance)}</b></span>`;
+    `<span>Advance given: <b>${rs(totalAdvance)}</b> &middot; Expenses claimed: <b>${rs(totalSpent)}</b></span>`;
 
   const tbody = document.getElementById('tbl-trips-body');
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="empty">${anyFilter ? 'No trips match these filters.' : 'No trips yet.'}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">${anyFilter ? 'No trips match these filters.' : 'No trips yet.'}</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map(t => `
     <tr onclick="openTripDetail('${t.TripCode}')" style="cursor:pointer;">
       <td class="mono">${t.TripCode}</td><td>${t.DoerName || t.DoerCode}</td><td>${t.LocationVisited || '—'}</td>
       <td>${t.StartDate || '—'}</td><td>${t.EndDate || '—'}</td><td>${rs(t.AdvanceReceived)}</td>
+      <td>${rs(t.VoucherTotal)}</td><td>${settlementCell(t)}</td>
       <td><span class="badge ${tripStatusBadgeClass(t.TripStatus)}">${t.TripStatus}</span></td>
     </tr>`).join('');
 }
