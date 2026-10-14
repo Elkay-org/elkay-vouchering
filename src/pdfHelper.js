@@ -1,5 +1,4 @@
 const { pool } = require('./db');
-const { downloadReceiptFromDrive } = require('./drive');
 const { buildVoucherPdf } = require('./voucherPdf');
 
 function toVoucherJson(v) {
@@ -33,21 +32,11 @@ async function buildTripPdfBuffer(trip, doerName, doerEmail) {
   const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [trip.trip_code]);
   const vouchers = vouchersResult.rows.map(toVoucherJson);
 
-  // Fetch every receipt photo in parallel (not one at a time) so this
-  // stays fast even with several vouchers - one failed/missing photo
-  // just gets skipped rather than breaking the whole PDF.
-  const withPhotos = vouchers.filter(v => v.ReceiptPhotoURL);
-  const fetched = await Promise.all(
-    withPhotos.map(v => downloadReceiptFromDrive(v.ReceiptPhotoURL).then(buffer => ({ voucherId: v.VoucherID, buffer })))
-  );
-  const receiptImages = fetched.filter(r => r.buffer); // drop any that failed to download
-
   const pdfBuffer = await buildVoucherPdf({
     trip: toTripJson(trip),
     doer: { DoerName: doerName, Email: doerEmail },
     vouchers,
-    passedBy: trip.passed_by,
-    receiptImages
+    passedBy: trip.passed_by
   });
   return pdfBuffer;
 }

@@ -2,6 +2,8 @@ const PDFDocument = require('pdfkit');
 
 const MARGIN = 36;
 const PAGE_WIDTH = 595.28; // A4 in points
+const PAGE_HEIGHT = 841.89;
+const BOTTOM_LIMIT = PAGE_HEIGHT - MARGIN - 14; // keep clear of the page-number line
 const LOGO_GUTTER = 95; // reserved space on the right for the logo, alongside the top field grid
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2 - LOGO_GUTTER;
 const FULL_WIDTH = PAGE_WIDTH - MARGIN * 2; // used below the grid, where the logo no longer applies
@@ -48,19 +50,16 @@ function centeredBar(doc, y, height, text, subtext, width, fill) {
 }
 
 /**
- * Builds the Petty Cash Voucher PDF for one finalized trip, matching
- * Elkay's existing paper format exactly, followed by every attached
- * receipt photo (multiple per page, compact). Vouchers with no photo
- * (marked "No receipt") are skipped here - that's already covered by
- * the "Receipt not received for / Note" field on the summary page.
- *
- * receiptImages: array of { voucherId, buffer } - the caller fetches
- * these from Drive ahead of time (in parallel) and passes them in;
- * this function never touches the network itself.
+ * Builds the Petty Cash Voucher PDF for one trip, matching Elkay's paper
+ * format - the trip SUMMARY only (no receipt photos). The Doer prints this
+ * and hands it to Accounts with the original bills attached. Long trips
+ * continue onto further pages with the table headings repeated; the
+ * totals and signature block are never split across pages.
  */
-function buildVoucherPdf({ trip, doer, vouchers, passedBy, accountsName, receiptImages }) {
+function buildVoucherPdf({ trip, doer, vouchers, passedBy }) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: MARGIN });
+    // bufferPages lets us add "Page X of Y" once we know how many pages there are
+    const doc = new PDFDocument({ size: 'A4', margin: MARGIN, bufferPages: true });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -117,35 +116,66 @@ function buildVoucherPdf({ trip, doer, vouchers, passedBy, accountsName, receipt
     // Voucher table
     const colWidths = { date: 75, desc: FULL_WIDTH - 75 - 100, amount: 100 };
     const rowH = 16;
-    box(doc, MARGIN, y, FULL_WIDTH, rowH, GREY_TABLEHEAD);
-    doc.moveTo(MARGIN + colWidths.date, y).lineTo(MARGIN + colWidths.date, y + rowH).stroke();
-    doc.moveTo(MARGIN + colWidths.date + colWidths.desc, y).lineTo(MARGIN + colWidths.date + colWidths.desc, y + rowH).stroke();
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT_COLOR);
-    doc.text('Date', MARGIN, y + 4, { width: colWidths.date, align: 'center' });
-    doc.text('Description', MARGIN + colWidths.date, y + 4, { width: colWidths.desc, align: 'center' });
-    doc.text('Amount (Rs.)', MARGIN + colWidths.date + colWidths.desc, y + 4, { width: colWidths.amount, align: 'center' });
-    y += rowH;
+    const drawTableHeader = () => {
+      box(doc, MARGIN, y, FULL_WIDTH, rowH, GREY_TABLEHEAD);
+      doc.moveTo(MARGIN + colWidths.date, y).lineTo(MARGIN + colWidths.date, y + rowH).stroke();
+      doc.moveTo(MARGIN + colWidths.date + colWidths.desc, y).lineTo(MARGIN + colWidths.date + colWidths.desc, y + rowH).stroke();
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT_COLOR);
+      doc.text('Date', MARGIN, y + 4, { width: colWidths.date, align: 'center', lineBreak: false });
+      doc.text('Description', MARGIN + colWidths.date, y + 4, { width: colWidths.desc, align: 'center', lineBreak: false });
+      doc.text('Amount (Rs.)', MARGIN + colWidths.date + colWidths.desc, y + 4, { width: colWidths.amount, align: 'center', lineBreak: false });
+      y += rowH;
+      doc.font('Helvetica').fontSize(8.5);
+    };
+    // Starts a fresh page for a long trip, with a small heading so a loose
+    // printed page can still be matched to its trip.
+    const newPage = (label) => {
+      doc.addPage();
+      y = MARGIN;
+      y = centeredBar(doc, y, 16, `${trip.TripCode} — ${doer.DoerName} (${label})`, null, FULL_WIDTH, GREY_SECTION);
+    };
+    drawTableHeader();
 
-    doc.font('Helvetica').fontSize(8.5);
     vouchers.forEach(v => {
+      if (y + rowH > BOTTOM_LIMIT) { newPage('continued'); drawTableHeader(); }
       box(doc, MARGIN, y, FULL_WIDTH, rowH);
       doc.moveTo(MARGIN + colWidths.date, y).lineTo(MARGIN + colWidths.date, y + rowH).stroke();
       doc.moveTo(MARGIN + colWidths.date + colWidths.desc, y).lineTo(MARGIN + colWidths.date + colWidths.desc, y + rowH).stroke();
       doc.fillColor(TEXT_COLOR);
-      doc.text(v.DateTime || '—', MARGIN, y + 4, { width: colWidths.date, align: 'center' });
-      doc.text(v.Description || v.ExpenseType || '—', MARGIN + colWidths.date, y + 4, { width: colWidths.desc, align: 'center' });
-      doc.text(Number(v.Amount).toLocaleString('en-IN'), MARGIN + colWidths.date + colWidths.desc, y + 4, { width: colWidths.amount, align: 'center' });
+      // lineBreak:false + ellipsis keeps a long description on one line inside its row
+      const cell = (w) => ({ width: w, align: 'center', lineBreak: false, height: rowH - 4, ellipsis: true });
+      doc.text(v.DateTime || '—', MARGIN, y + 4, cell(colWidths.date));
+      doc.text(v.Description || v.ExpenseType || '—', MARGIN + colWidths.date + 4, y + 4, cell(colWidths.desc - 8));
+      doc.text(Number(v.Amount).toLocaleString('en-IN'), MARGIN + colWidths.date + colWidths.desc, y + 4, cell(colWidths.amount));
       y += rowH;
     });
 
+    // Total row, so a multi-page list still ends with its sum
+    if (y + rowH > BOTTOM_LIMIT) { newPage('continued'); drawTableHeader(); }
+    box(doc, MARGIN, y, colWidths.date + colWidths.desc, rowH, GREY_LIGHT);
+    box(doc, MARGIN + colWidths.date + colWidths.desc, y, colWidths.amount, rowH, GREY_LIGHT);
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT_COLOR)
+      .text(`Total Expenses (${vouchers.length} item${vouchers.length === 1 ? '' : 's'})`, MARGIN, y + 4, { width: colWidths.date + colWidths.desc - 8, align: 'right', lineBreak: false })
+      .text(totalVouchers.toLocaleString('en-IN'), MARGIN + colWidths.date + colWidths.desc, y + 4, { width: colWidths.amount, align: 'center', lineBreak: false });
+    y += rowH;
+
+    // Everything below (note, final amount, signatures, notes) is printed as
+    // one block - it never splits across pages, so signatures always sit
+    // right under the amount they are signing for.
+    const noteText = trip.ReceiptNotReceivedFor || '';
+    doc.font('Helvetica').fontSize(8);
+    const noteTextH = noteText ? doc.heightOfString(noteText, { width: colWidths.date + colWidths.desc - 10 }) : 0;
+    const noteRowH = Math.max(24, 15 + noteTextH + 4);
+    const FOOTER_H = noteRowH + 20 + 12 + 32 + 18 + 36 + 6;
+    if (y + FOOTER_H > BOTTOM_LIMIT) newPage('summary & signatures');
+
     // Note / Final amount - two stacked rows reusing the same 3-column
     // widths as the table above, matching the reference exactly.
-    const noteRowH = 24;
     box(doc, MARGIN, y, colWidths.date + colWidths.desc, noteRowH);
     box(doc, MARGIN + colWidths.date + colWidths.desc, y, colWidths.amount, noteRowH);
     doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT_COLOR)
       .text('Receipt not received for / Note:', MARGIN, y + 4, { width: colWidths.date + colWidths.desc, align: 'center' });
-    doc.font('Helvetica').fontSize(8).text(trip.ReceiptNotReceivedFor || '', MARGIN, y + 15, { width: colWidths.date + colWidths.desc - 10, align: 'center' });
+    doc.font('Helvetica').fontSize(8).text(noteText, MARGIN + 5, y + 15, { width: colWidths.date + colWidths.desc - 10, align: 'center' });
     y += noteRowH;
 
     const finalRowH = 20;
@@ -196,60 +226,25 @@ function buildVoucherPdf({ trip, doer, vouchers, passedBy, accountsName, receipt
     });
     doc.fillColor(TEXT_COLOR);
 
-    // Receipt photo pages - multiple per page, compact grid.
-    if (receiptImages && receiptImages.length) {
-      addReceiptPages(doc, receiptImages, vouchers);
+    // Receipt photos are no longer part of the PDF - this is the trip
+    // summary the Doer prints and hands in WITH the original bills.
+
+    // "Page X of Y" on every page, but only when there's more than one
+    const range = doc.bufferedPageRange();
+    if (range.count > 1) {
+      for (let i = 0; i < range.count; i++) {
+        doc.switchToPage(range.start + i);
+        // the number sits inside the bottom margin, so lift the margin while
+        // writing it - otherwise the library would start yet another page
+        const savedBottom = doc.page.margins.bottom;
+        doc.page.margins.bottom = 0;
+        doc.font('Helvetica').fontSize(7.5).fillColor('#555555')
+          .text(`${trip.TripCode}  ·  Page ${i + 1} of ${range.count}`, MARGIN, PAGE_HEIGHT - MARGIN - 6, { width: FULL_WIDTH, align: 'right', lineBreak: false });
+        doc.page.margins.bottom = savedBottom;
+      }
     }
 
     doc.end();
-  });
-}
-
-/** Places up to 4 receipt photos per page, in a 2x2 grid with a caption under each. */
-function addReceiptPages(doc, receiptImages, vouchers) {
-  const PER_PAGE = 4, COLS = 2, ROWS = 2;
-  const GAP = 12;
-  const HEADER_H = 26;
-  const gridW = FULL_WIDTH;
-  const gridH = 760 - HEADER_H; // kept comfortably inside the page - pdfkit auto-paginates if content gets too close to the bottom margin
-  const cellW = (gridW - GAP) / COLS;
-  const cellH = (gridH - GAP) / ROWS;
-  const imgH = cellH - 18; // leaves room for the caption line below each photo
-
-  const voucherById = {};
-  vouchers.forEach(v => { voucherById[v.VoucherID] = v; });
-
-  receiptImages.forEach((r, i) => {
-    if (i % PER_PAGE === 0) {
-      doc.addPage();
-      doc.font('Helvetica-Bold').fontSize(11).fillColor('#000000').text('Attached Receipts', MARGIN, MARGIN);
-    }
-    const posInPage = i % PER_PAGE;
-    const col = posInPage % COLS;
-    const row = Math.floor(posInPage / COLS);
-    const x = MARGIN + col * (cellW + GAP);
-    const y = MARGIN + HEADER_H + row * (cellH + GAP);
-
-    // pdfkit tracks its own "current y" across calls and will silently
-    // insert a page break if that tracked position looks close to the
-    // bottom margin - which happens constantly in a side-by-side grid,
-    // since column 2's y is often "behind" column 1's after drawing.
-    // Resetting doc.y right before each positioned call keeps pdfkit's
-    // bookkeeping in sync with our own grid math instead of its own.
-    doc.y = y;
-    doc.x = x;
-    try {
-      doc.image(r.buffer, x, y, { fit: [cellW, imgH], align: 'center', valign: 'center' });
-    } catch (e) {
-      doc.rect(x, y, cellW, imgH).stroke();
-      doc.font('Helvetica').fontSize(8).fillColor('#888').text('Could not load this photo', x, y + imgH / 2 - 5, { width: cellW, align: 'center' });
-    }
-
-    const v = voucherById[r.voucherId] || {};
-    const caption = `${r.voucherId} — ${v.Description || v.ExpenseType || ''} — Rs. ${Number(v.Amount || 0).toLocaleString('en-IN')}`;
-    doc.y = y + imgH + 3;
-    doc.x = x;
-    doc.font('Helvetica').fontSize(8).fillColor('#000000').text(caption, x, y + imgH + 3, { width: cellW, align: 'center' });
   });
 }
 

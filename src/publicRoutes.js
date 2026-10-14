@@ -1,9 +1,8 @@
 const express = require('express');
 const { pool } = require('./db');
 const { formatDate, nextSequentialCode } = require('./idHelper');
-const { downloadReceiptFromDrive } = require('./drive');
 const { sendAdvanceRequestNotification, sendTripSubmittedNotification } = require('./mailer');
-const { buildVoucherPdf } = require('./voucherPdf');
+const { buildTripPdfBuffer } = require('./pdfHelper');
 
 const router = express.Router();
 
@@ -201,6 +200,31 @@ router.post('/doer/:doerCode/start-trip', async (req, res) => {
   }
 });
 
+/**
+ * Moves the Doer's current available advance onto an Ongoing trip - for
+ * when they forgot to choose "use my advance" while starting it (or got
+ * a new advance approved mid-trip).
+ */
+router.post('/doer/:doerCode/trip/:tripCode/use-advance', async (req, res) => {
+  try {
+    const doer = await getActiveDoer(req.params.doerCode);
+    if (!doer) return res.status(404).json({ ok: false, error: 'Doer not found or inactive.' });
+    const trip = (await pool.query('SELECT * FROM trips WHERE trip_code = $1', [req.params.tripCode])).rows[0];
+    if (!trip || trip.doer_code !== doer.doer_code) return res.status(404).json({ ok: false, error: 'Trip not found.' });
+    if (trip.trip_status !== 'Ongoing') return res.status(400).json({ ok: false, error: 'Advance can only be added to an ongoing trip.' });
+    const available = await getAvailableBalance(doer.doer_code);
+    if (available <= 0) return res.status(400).json({ ok: false, error: 'You have no available advance to add.' });
+    const result = await pool.query(
+      'UPDATE trips SET advance_received = COALESCE(advance_received, 0) + $1 WHERE trip_code = $2 RETURNING *',
+      [available, trip.trip_code]
+    );
+    res.json({ ok: true, record: toTripJson(result.rows[0]) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /** Trip detail + its vouchers. Ownership is checked here - a Doer can only ever see a trip that's actually theirs. */
 router.get('/doer/:doerCode/trip/:tripCode', async (req, res) => {
   try {
@@ -232,22 +256,8 @@ router.get('/doer/:doerCode/trip/:tripCode/pdf', async (req, res) => {
     if (!trip || trip.doer_code !== req.params.doerCode) {
       return res.status(404).json({ ok: false, error: 'Trip not found.' });
     }
-    const vouchersResult = await pool.query('SELECT * FROM vouchers WHERE trip_code = $1 ORDER BY id', [req.params.tripCode]);
-    const vouchers = vouchersResult.rows.map(toVoucherJson);
-
-    const withPhotos = vouchers.filter(v => v.ReceiptPhotoURL);
-    const fetched = await Promise.all(
-      withPhotos.map(v => downloadReceiptFromDrive(v.ReceiptPhotoURL).then(buffer => ({ voucherId: v.VoucherID, buffer })))
-    );
-    const receiptImages = fetched.filter(r => r.buffer);
-
-    const pdfBuffer = await buildVoucherPdf({
-      trip: toTripJson(trip),
-      doer: { DoerName: trip.doer_name, Email: trip.email },
-      vouchers,
-      passedBy: trip.passed_by,
-      receiptImages
-    });
+    // Same shared builder Accounts uses, so the Doer's copy is always identical
+    const pdfBuffer = await buildTripPdfBuffer(trip, trip.doer_name, trip.email);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Petty Cash Voucher - ${trip.trip_code}.pdf"`);
