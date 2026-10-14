@@ -234,7 +234,10 @@ function renderDashboard() {
   const submitted = trips.filter(t => t.TripStatus === 'Submitted');
   const pendingAdv = advances.filter(a => a.Status === 'Pending');
   const withDoers = balances.reduce((s2, b) => s2 + Math.max(0, b.WithDoer), 0);
-  const toCollect = balances.reduce((s2, b) => s2 + b.ToCollect, 0);
+  const nowD = new Date();
+  const thisMonth = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}`;
+  const monthExpenses = trips.filter(t => t.TripStatus === 'Passed' && ddmmyyyyToIso(t.PassedDate).slice(0, 7) === thisMonth)
+    .reduce((s2, t) => s2 + Number(t.VoucherTotal || 0), 0);
   const claimed = submitted.reduce((s2, t) => s2 + Number(t.VoucherTotal || 0), 0);
   const requested = pendingAdv.reduce((s2, a) => s2 + Number(a.RequestedAmount || 0), 0);
 
@@ -244,7 +247,7 @@ function renderDashboard() {
     kpi('var(--amber-text)', 'Trips to review', submitted.length, submitted.length ? `${rs(claimed)} claimed` : 'All caught up', "goToTrips({status:'Submitted'})") +
     kpi('var(--brand)', 'Advance requests', pendingAdv.length, pendingAdv.length ? `${rs(requested)} requested` : 'None pending', "goToAdvances('Pending')") +
     kpi('#4a90d9', 'Cash with Doers', rs(withDoers), 'Unused advance + open trips', "document.getElementById('tbl-dash-balances').scrollIntoView({behavior:'smooth'})") +
-    kpi('var(--text-3)', 'Kept, not returned', rs(toCollect), toCollect ? 'Already part of cash with Doers' : 'None', "document.getElementById('tbl-dash-balances').scrollIntoView({behavior:'smooth'})");
+    kpi('var(--green-text)', 'Expenses passed', rs(monthExpenses), 'This month, on passed trips', "goToTrips({status:'Passed'})");
 
   // ---- Needs your attention: oldest first, so nothing waits too long ----
   const items = [];
@@ -289,18 +292,17 @@ function renderDashboard() {
 
   // ---- Doer balances ----
   const tbody = document.getElementById('tbl-dash-balances');
-  const shown = balances.filter(b => b.Active === 'Y' || b.WithDoer !== 0 || b.ToCollect > 0 || b.OpenTrips > 0)
-    .sort((x, y) => (y.WithDoer + y.ToCollect) - (x.WithDoer + x.ToCollect));
+  const shown = balances.filter(b => b.Active === 'Y' || b.WithDoer !== 0 || b.OpenTrips > 0)
+    .sort((x, y) => y.WithDoer - x.WithDoer);
   tbody.innerHTML = shown.length ? shown.map(b => `
     <tr style="cursor:pointer;" onclick="goToTrips({doer:'${b.DoerCode}'})">
       <td>${b.DoerName}${b.Active === 'Y' ? '' : ' <span class="sub">(inactive)</span>'}</td>
       <td class="${b.Available < 0 ? 'amt-red' : ''}">${rs(b.Available)}</td>
       <td>${rs(b.OnActiveTrips)}</td>
       <td><b>${rs(b.WithDoer)}</b></td>
-      <td>${b.ToCollect > 0 ? rs(b.ToCollect) : '—'}</td>
       <td>${b.OpenTrips}</td>
     </tr>`).join('')
-    : '<tr><td colspan="6" class="empty">No Doers yet.</td></tr>';
+    : '<tr><td colspan="5" class="empty">No Doers yet.</td></tr>';
 }
 
 /* ---------------- BADGES ---------------- */
@@ -371,11 +373,10 @@ function renderTrips() {
 
   const filtered = STATE.tripStatusFilter ? base.filter(t => t.TripStatus === STATE.tripStatusFilter) : base;
   const anyFilter = q || doer || from || to || STATE.tripStatusFilter;
-  const totalAdvance = filtered.reduce((sum, t) => sum + Number(t.AdvanceReceived || 0), 0);
   const totalSpent = filtered.reduce((sum, t) => sum + Number(t.VoucherTotal || 0), 0);
   document.getElementById('ft-summary').innerHTML =
     `<span>Showing <b>${filtered.length}</b> of ${STATE.trips.length} trips${STATE.tripStatusFilter ? ` &middot; status: <b>${STATE.tripStatusFilter}</b>` : ''}</span>` +
-    `<span>Advance given: <b>${rs(totalAdvance)}</b> &middot; Expenses claimed: <b>${rs(totalSpent)}</b></span>`;
+    `<span>Expenses claimed: <b>${rs(totalSpent)}</b></span>`;
 
   const tbody = document.getElementById('tbl-trips-body');
   if (!filtered.length) {
@@ -547,10 +548,12 @@ function renderAdvances() {
 
   const totalReq = filtered.reduce((s2, a) => s2 + Number(a.RequestedAmount || 0), 0);
   const totalAppr = filtered.reduce((s2, a) => s2 + Number(a.ApprovedAmount || 0), 0);
+  const totalPendingAmt = filtered.filter(a => a.Status === 'Pending').reduce((s2, a) => s2 + Number(a.RequestedAmount || 0), 0);
   const pendingCount = STATE.advances.filter(a => a.Status === 'Pending').length;
   document.getElementById('fa-summary').innerHTML =
     `<span>Showing <b>${filtered.length}</b> of ${STATE.advances.length} requests${pendingCount ? ` &middot; <b>${pendingCount}</b> pending overall` : ''}</span>` +
-    `<span>Requested: <b>${rs(totalReq)}</b> &middot; Approved: <b>${rs(totalAppr)}</b></span>`;
+    `<span>Asked for: <b>${rs(totalReq)}</b> &middot; Approved: <b>${rs(totalAppr)}</b>` +
+    (totalPendingAmt ? ` &middot; Awaiting decision: <b>${rs(totalPendingAmt)}</b>` : '') + `</span>`;
 
   const tbody = document.getElementById('tbl-advances-body');
   if (!filtered.length) {
@@ -698,7 +701,7 @@ async function submitGenerateReport() {
           <td>Rs. ${d.totalExpenses.toLocaleString('en-IN')}</td>
           <td>Rs. ${d.reimbursementPaid.toLocaleString('en-IN')}</td>
           <td>Rs. ${d.confirmedReturned.toLocaleString('en-IN')}</td>
-          <td style="${d.stillOutstanding > 0 ? 'color:var(--amber-text);font-weight:700;' : ''}">Rs. ${d.stillOutstanding.toLocaleString('en-IN')}</td>
+          <td style="${d.balanceWithDoer < 0 ? 'color:var(--red-text);font-weight:700;' : ''}">Rs. ${d.balanceWithDoer.toLocaleString('en-IN')}</td>
         </tr>`).join('');
       const t = res.totals;
       const totalsRow = `
@@ -708,7 +711,7 @@ async function submitGenerateReport() {
           <td>Rs. ${t.totalExpenses.toLocaleString('en-IN')}</td>
           <td>Rs. ${t.reimbursementPaid.toLocaleString('en-IN')}</td>
           <td>Rs. ${t.confirmedReturned.toLocaleString('en-IN')}</td>
-          <td style="${t.stillOutstanding > 0 ? 'color:var(--amber-text);' : ''}">Rs. ${t.stillOutstanding.toLocaleString('en-IN')}</td>
+          <td>Rs. ${t.balanceWithDoer.toLocaleString('en-IN')}</td>
         </tr>`;
       tbody.innerHTML = rows + totalsRow;
     }

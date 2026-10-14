@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const { pool } = require('./db');
+const { getAvailableBalance } = require('./publicRoutes');
 
 function parseDDMMYYYY(str) {
   if (!str) return null;
@@ -57,25 +58,22 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
     // at Pass time - a bare calculated figure isn't the same as money
     // Accounts has genuinely collected back.
     const confirmedReturned = unspentAmount > 0 && t.advance_returned === 'Y' ? unspentAmount : 0;
-    const stillOutstanding = unspentAmount > 0 && t.advance_returned !== 'Y' ? unspentAmount : 0;
 
     if (!byDoer[t.doer_code]) {
       byDoer[t.doer_code] = {
         doerName: t.doer_name, doerCode: t.doer_code, trips: 0,
-        advanceDisbursed: 0, totalExpenses: 0, reimbursementPaid: 0, confirmedReturned: 0, stillOutstanding: 0
+        advanceDisbursed: 0, totalExpenses: 0, reimbursementPaid: 0, confirmedReturned: 0, balanceWithDoer: 0
       };
     }
     const d = byDoer[t.doer_code];
     d.trips += 1;
-    d.advanceDisbursed += advance;
     d.totalExpenses += voucherTotal;
     d.reimbursementPaid += reimbursementPaid;
     d.confirmedReturned += confirmedReturned;
-    d.stillOutstanding += stillOutstanding;
 
     let returnStatus = 'N/A - nothing left over';
     if (unspentAmount > 0) {
-      returnStatus = t.advance_returned === 'Y' ? 'Confirmed Returned' : 'Not Yet Returned';
+      returnStatus = t.advance_returned === 'Y' ? 'Confirmed Returned' : 'Kept for next trip';
     }
     tripDetails.push({
       tripCode: t.trip_code, doerName: t.doer_name, location: t.location_visited,
@@ -86,6 +84,34 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
     });
   });
 
+  // Advance Disbursed = advances Accounts actually APPROVED in this period.
+  // (Not the sum of trip advances - a trip's advance is the Doer's whole
+  // balance carried in, so adding them up counts the same money again on
+  // every trip.)
+  const advRows = (await pool.query(`
+    SELECT ar.doer_code, ar.approved_amount, ar.decided_at, ar.created_at, d.doer_name
+    FROM advance_requests ar JOIN doers d ON d.doer_code = ar.doer_code WHERE ar.status = 'Approved'
+  `)).rows;
+  advRows.forEach(a => {
+    const when = parseDDMMYYYY(a.decided_at) || parseDDMMYYYY(a.created_at);
+    if (!when || when < startDate || when > endDate) return;
+    if (!byDoer[a.doer_code]) {
+      byDoer[a.doer_code] = { doerName: a.doer_name, doerCode: a.doer_code, trips: 0,
+        advanceDisbursed: 0, totalExpenses: 0, reimbursementPaid: 0, confirmedReturned: 0, balanceWithDoer: 0 };
+    }
+    byDoer[a.doer_code].advanceDisbursed += Number(a.approved_amount || 0);
+  });
+
+  // Balance with Doer = what they actually hold RIGHT NOW (unused balance +
+  // advance on trips still open) - the same figure as the Dashboard.
+  const openTripRows = (await pool.query(
+    "SELECT doer_code, COALESCE(SUM(advance_received), 0) AS held FROM trips WHERE trip_status IN ('Ongoing', 'Rejected') GROUP BY doer_code"
+  )).rows;
+  for (const d of Object.values(byDoer)) {
+    const held = Number((openTripRows.find(r => r.doer_code === d.doerCode) || {}).held || 0);
+    d.balanceWithDoer = (await getAvailableBalance(d.doerCode)) + held;
+  }
+
   const doerRows = Object.values(byDoer).sort((a, b) => a.doerName.localeCompare(b.doerName));
   const totals = doerRows.reduce((acc, d) => ({
     trips: acc.trips + d.trips,
@@ -93,8 +119,8 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
     totalExpenses: acc.totalExpenses + d.totalExpenses,
     reimbursementPaid: acc.reimbursementPaid + d.reimbursementPaid,
     confirmedReturned: acc.confirmedReturned + d.confirmedReturned,
-    stillOutstanding: acc.stillOutstanding + d.stillOutstanding
-  }), { trips: 0, advanceDisbursed: 0, totalExpenses: 0, reimbursementPaid: 0, confirmedReturned: 0, stillOutstanding: 0 });
+    balanceWithDoer: acc.balanceWithDoer + d.balanceWithDoer
+  }), { trips: 0, advanceDisbursed: 0, totalExpenses: 0, reimbursementPaid: 0, confirmedReturned: 0, balanceWithDoer: 0 });
 
   // ---------- Build the Excel workbook ----------
   const workbook = new ExcelJS.Workbook();
@@ -106,24 +132,24 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
     { header: 'Doer', key: 'doerName', width: 22 },
     { header: 'Doer Code', key: 'doerCode', width: 12 },
     { header: 'Trips Passed', key: 'trips', width: 14 },
-    { header: 'Advance Disbursed (Rs.)', key: 'advanceDisbursed', width: 22 },
+    { header: 'Advance Approved This Period (Rs.)', key: 'advanceDisbursed', width: 30 },
     { header: 'Total Expenses (Rs.)', key: 'totalExpenses', width: 20 },
     { header: 'Reimbursement Paid (Rs.)', key: 'reimbursementPaid', width: 24 },
     { header: 'Advance Returned - Confirmed (Rs.)', key: 'confirmedReturned', width: 30 },
-    { header: 'Advance Outstanding - Not Returned (Rs.)', key: 'stillOutstanding', width: 34 }
+    { header: 'Balance With Doer Now (Rs.)', key: 'balanceWithDoer', width: 28 }
   ];
   summarySheet.getRow(1).font = HEADER_FONT;
   summarySheet.getRow(1).fill = HEADER_FILL;
   doerRows.forEach(d => summarySheet.addRow(d));
   const totalsRow = summarySheet.addRow({ doerName: 'TOTAL', doerCode: '', ...totals });
   totalsRow.font = { bold: true };
-  ['advanceDisbursed', 'totalExpenses', 'reimbursementPaid', 'confirmedReturned', 'stillOutstanding'].forEach(key => {
+  ['advanceDisbursed', 'totalExpenses', 'reimbursementPaid', 'confirmedReturned', 'balanceWithDoer'].forEach(key => {
     summarySheet.getColumn(key).numFmt = CURRENCY_FMT;
   });
   // Flag rows with real outstanding money in amber, so it visually jumps out
   doerRows.forEach((d, i) => {
-    if (d.stillOutstanding > 0) {
-      summarySheet.getRow(i + 2).getCell('stillOutstanding').font = { bold: true, color: { argb: 'FFB5460A' } };
+    if (d.balanceWithDoer < 0) {
+      summarySheet.getRow(i + 2).getCell('balanceWithDoer').font = { bold: true, color: { argb: 'FFB5460A' } };
     }
   });
 
@@ -133,7 +159,7 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
     { header: 'Doer', key: 'doerName', width: 20 },
     { header: 'Location', key: 'location', width: 18 },
     { header: 'Passed Date', key: 'passedDate', width: 14 },
-    { header: 'Advance (Rs.)', key: 'advance', width: 14 },
+    { header: 'Advance at Start (Rs.)', key: 'advance', width: 20 },
     { header: 'Vouchers Total (Rs.)', key: 'vouchers', width: 18 },
     { header: 'Settlement', key: 'settlement', width: 28 },
     { header: 'Advance Return Status', key: 'returnStatus', width: 22 }
@@ -144,7 +170,7 @@ async function buildWeeklyReportBuffer(startDateStr, endDateStr) {
   ['advance', 'vouchers'].forEach(key => { detailSheet.getColumn(key).numFmt = CURRENCY_FMT; });
   // Same amber flag on the detail rows that are still outstanding
   tripDetails.forEach((t, i) => {
-    if (t.returnStatus === 'Not Yet Returned') {
+    if (t.returnStatus === 'Kept for next trip') {
       detailSheet.getRow(i + 2).getCell('returnStatus').font = { bold: true, color: { argb: 'FFB5460A' } };
     }
   });
