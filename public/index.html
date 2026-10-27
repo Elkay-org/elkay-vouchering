@@ -10,13 +10,36 @@
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
-    <div class="login-box">
-      <h2>Elkay Vouchering</h2>
-      <div class="field"><label>Email</label><input type="email" id="login-email"></div>
-      <div class="field"><label>Password</label><input type="password" id="login-password"></div>
-      <p class="sub" id="login-error" style="color:var(--red-text);margin:-6px 0 12px;"></p>
-      <button style="width:100%;" onclick="submitLogin()">Log In</button>
-    </div>
+    <section class="login-brand">
+      <div class="brand-row">
+        <div class="brand-icon">EV</div>
+        <div class="brand-text-wrap"><div class="brand-company">Elkay Corporation</div><div class="brand-text">Vouchering</div></div>
+      </div>
+      <div>
+        <h1>Trip advances and expenses, settled in one place.</h1>
+        <p>Request an advance, log every voucher on the trip, and get it reviewed and settled by Accounts — with a printable summary for filing.</p>
+      </div>
+      <div class="login-tags"><span>Advances</span><span>Trip Vouchers</span><span>Accounts Review</span><span>Weekly Reports</span></div>
+    </section>
+    <section class="login-side">
+      <div class="login-box">
+        <h2>Sign in</h2>
+        <p class="login-sub">Use your Elkay Vouchering login.</p>
+        <div class="field"><label for="login-email">Email</label><input type="email" id="login-email" placeholder="name@idett.co.in" autocomplete="username"></div>
+        <div class="field"><label for="login-password">Password</label>
+          <div class="password-field">
+            <input type="password" id="login-password" placeholder="Your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()">
+            <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('login-password', this)" aria-label="Show password">
+              <span class="eye-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 9S4 4 9 4s7.5 5 7.5 5-2.5 5-7.5 5-7.5-5-7.5-5z"/><circle cx="9" cy="9" r="2.2"/></svg></span>
+              <span class="eye-off-icon"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 9S4 4 9 4s7.5 5 7.5 5-2.5 5-7.5 5-7.5-5-7.5-5z"/><circle cx="9" cy="9" r="2.2"/><path d="M2.5 2.5l13 13"/></svg></span>
+            </button>
+          </div>
+        </div>
+        <button class="login-btn" onclick="submitLogin()">Sign in</button>
+        <p id="login-error" style="color:var(--red-text);font-size:12.5px;margin-top:10px;"></p>
+        <p class="login-help">Forgot your password? Ask your Vouchering admin to reset it.</p>
+      </div>
+    </section>
   </div>
 
   <!-- ===== MAIN APP ===== -->

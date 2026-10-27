@@ -101,9 +101,28 @@ tbody tr:hover td{background:var(--bg-2);}
 .toast.error{background:var(--red-bg);color:var(--red-text);border-color:var(--red);}
 .toast.show{display:block;}
 
-.login-screen{display:flex;align-items:center;justify-content:center;height:100vh;}
-.login-box{background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:32px;width:360px;}
-.login-box h2{margin-bottom:20px;text-align:center;}
+/* ---------- Login (same layout as HRMS, in Vouchering violet) ---------- */
+.login-screen{display:flex;flex-wrap:wrap;align-items:stretch;justify-content:center;min-height:100vh;}
+.login-brand{flex:1 1 420px;display:flex;flex-direction:column;justify-content:space-between;gap:40px;padding:56px;background:#2E2470;color:#F4F2FF;}
+[data-theme="light"] .login-brand{background:#5B46D6;color:#FFFFFF;}
+.login-brand .brand-row{display:flex;align-items:center;gap:12px;}
+.login-brand .brand-icon{background:#F4F2FF;color:#2E2470;width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+[data-theme="light"] .login-brand .brand-icon{color:#5B46D6;}
+.login-brand .brand-company{color:inherit;opacity:.85;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}
+.login-brand .brand-text{font-size:17px;font-weight:700;}
+.login-brand h1{font-size:40px;line-height:1.15;font-weight:700;letter-spacing:-.02em;max-width:470px;margin:0;}
+.login-brand p{margin:18px 0 0;font-size:15.5px;line-height:1.6;opacity:.9;max-width:470px;}
+.login-tags{display:flex;flex-wrap:wrap;gap:10px;}
+.login-tags span{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid rgba(255,255,255,.35);}
+.login-side{flex:1 1 420px;display:flex;align-items:center;justify-content:center;padding:56px 32px;}
+.login-box{width:100%;max-width:380px;}
+.login-box h2{margin:0 0 6px;font-size:26px;font-weight:700;}
+.login-box .login-sub{color:var(--text-2);margin:0 0 22px;font-size:14px;}
+.login-box label{text-transform:none;font-size:12.5px;color:var(--text-2);}
+.login-box input{padding:13px 14px;border-radius:10px;}
+.login-box .login-btn{width:100%;padding:14px 16px;font-size:15px;border-radius:10px;margin-top:4px;}
+.login-box .login-help{font-size:12.5px;color:var(--text-3);margin-top:14px;line-height:1.5;}
+@media (max-width:760px){ .login-brand{padding:32px;} .login-brand h1{font-size:30px;} }
 
 /* ---------- Sidebar icons ---------- */
 .side-icon{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:inherit;}
@@ -225,3 +244,9 @@ html{background-color:#0d0f15;}
 html[data-theme="light"]{background-color:#f1f3f8;}
 body{min-height:100vh;}
 .dash-card .tablewrap{box-shadow:none;}
+
+/* Browsers paint auto-filled boxes light blue/yellow; keep them in the theme colours instead */
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus{
+  -webkit-text-fill-color:var(--text-1); caret-color:var(--text-1);
+  -webkit-box-shadow:0 0 0 1000px var(--bg-2) inset; transition:background-color 99999s ease-out 0s;
+}
